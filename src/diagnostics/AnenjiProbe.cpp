@@ -3,10 +3,12 @@
 namespace {
 constexpr int kInverterRxPin = 33;  // ESP32 RX <- MAX3232 TTL TX
 constexpr int kInverterTxPin = 32;  // ESP32 TX -> MAX3232 TTL RX
+constexpr uint32_t kSniffDurationMs = 20000;
 constexpr size_t kMaxResponse = 512;
 constexpr size_t kMaxResults = 16;
 
 HardwareSerial inverter(2);
+HardwareSerial secondSniffer(1);
 
 struct Capture {
   uint8_t data[kMaxResponse]{};
@@ -227,6 +229,113 @@ void passiveListen(uint32_t baud, uint32_t durationMs) {
   showCapture("pasywny nasluch", baud, capture, false);
 }
 
+struct SniffLine {
+  HardwareSerial* uart;
+  const char* name;
+  uint8_t data[256]{};
+  size_t length = 0;
+  bool overflow = false;
+  uint32_t firstByteAt = 0;
+  uint32_t lastByteAt = 0;
+};
+
+void flushSniffLine(SniffLine& line, uint32_t startedAt) {
+  if (!line.length && !line.overflow) return;
+  Serial.print('[');
+  Serial.print(line.firstByteAt - startedAt);
+  Serial.print(" ms] ");
+  printBytes(line.name, line.data, line.length);
+  if (line.overflow) Serial.println("UWAGA: fragment byl dluzszy niz bufor i zostal uciety.");
+  line.length = 0;
+  line.overflow = false;
+}
+
+void pollSniffLine(SniffLine& line, uint32_t now) {
+  while (line.uart->available()) {
+    const int value = line.uart->read();
+    if (value < 0) break;
+    if (!line.length && !line.overflow) line.firstByteAt = now;
+    line.lastByteAt = now;
+    if (line.length < sizeof(line.data)) {
+      line.data[line.length++] = static_cast<uint8_t>(value);
+    } else {
+      line.overflow = true;
+    }
+  }
+}
+
+void dualPassiveSniff(uint32_t baud) {
+  inverter.end();
+  secondSniffer.end();
+  delay(80);
+
+  // Oba piny sa tutaj tylko wejsciami. Nie podajemy zadnego sygnalu na dongle.
+  inverter.setRxBufferSize(1024);
+  secondSniffer.setRxBufferSize(1024);
+  inverter.begin(baud, SERIAL_8N1, kInverterRxPin, -1);
+  secondSniffer.begin(baud, SERIAL_8N1, kInverterTxPin, -1);
+  delay(120);
+  while (inverter.available()) inverter.read();
+  while (secondSniffer.available()) secondSniffer.read();
+
+  SniffLine lineA{&inverter, "PAD TX -> GPIO33"};
+  SniffLine lineB{&secondSniffer, "PAD RX -> GPIO32"};
+  const uint32_t startedAt = millis();
+  const uint32_t frameGapMs = baud <= 2400 ? 25 : 10;
+
+  Serial.println();
+  Serial.println("================ PODSLUCH DONGLA ================");
+  Serial.printf("Predkosc: %lu 8N1, czas: %lu s\n",
+                static_cast<unsigned long>(baud),
+                static_cast<unsigned long>(kSniffDurationMs / 1000));
+  Serial.println("ESP tylko slucha. Dongle ma byc normalnie zasilony i polaczony z falownikiem.");
+  Serial.println("GPIO33 <- pad TX, GPIO32 <- pad RX, GND <-> GND; bez MAX3232 i bez 3.3V.");
+
+  while (millis() - startedAt < kSniffDurationMs) {
+    const uint32_t now = millis();
+    pollSniffLine(lineA, now);
+    pollSniffLine(lineB, now);
+    if ((lineA.length || lineA.overflow) && now - lineA.lastByteAt >= frameGapMs) flushSniffLine(lineA, startedAt);
+    if ((lineB.length || lineB.overflow) && now - lineB.lastByteAt >= frameGapMs) flushSniffLine(lineB, startedAt);
+    delay(1);
+  }
+  flushSniffLine(lineA, startedAt);
+  flushSniffLine(lineB, startedAt);
+  Serial.println("================ KONIEC PODSLUCHU ================");
+  Serial.println("Wpisz s dla 2400 baud, 9 dla 9600 baud albo r dla aktywnego testu RS232.");
+}
+
+bool loopbackAt(uint32_t baud) {
+  configureUart(baud);
+  const uint8_t pattern[] = {0x55, 0xAA, 0x00, 0xFF, 0x11, 0x22, 0x33, 0xCC};
+  Serial.println();
+  Serial.print("MAX3232 loopback @ ");
+  Serial.print(baud);
+  Serial.println(" 8N1");
+  printBytes("TX", pattern, sizeof(pattern));
+  inverter.write(pattern, sizeof(pattern));
+  inverter.flush();
+  const Capture capture = captureResponse(1000, 120);
+  if (capture.length) printBytes("RX", capture.data, capture.length);
+  const bool ok = capture.length == sizeof(pattern) && memcmp(capture.data, pattern, sizeof(pattern)) == 0;
+  Serial.println(ok ? "WYNIK LOOPBACK: OK" : "WYNIK LOOPBACK: BLAD");
+  return ok;
+}
+
+void runLoopbackTest() {
+  Serial.println();
+  Serial.println("================ TEST MAX3232 ================");
+  Serial.println("Odlacz RJ45 od falownika i zewrzyj T1OUT z R1IN po stronie RS232.");
+  Serial.println("Nie zwieraj zasilania ani pinow po stronie TTL.");
+  const bool ok2400 = loopbackAt(2400);
+  const bool ok9600 = loopbackAt(9600);
+  Serial.println();
+  Serial.println(ok2400 && ok9600
+                     ? "MAX3232 i UART dzialaja w obu kierunkach."
+                     : "Tor ESP32/MAX3232 nie przeszedl testu; sprawdz T1IN/T1OUT/R1IN/R1OUT, VCC i GND.");
+  Serial.println("================================================");
+}
+
 void printSummary() {
   Serial.println();
   Serial.println("================ PODSUMOWANIE ================");
@@ -253,6 +362,7 @@ void printSummary() {
     Serial.println("Nie zamieniaj GPIO po stronie TTL bez sprawdzenia kierunku kanalow MAX3232.");
   }
   Serial.println("Wpisz r i Enter, aby powtorzyc test.");
+  Serial.println("Wpisz s dla podsluchu obu pol TTL dongla @ 2400 lub 9 dla 9600.");
   Serial.println("================================================");
 }
 
@@ -269,7 +379,10 @@ void runAllTests() {
   passiveListen(2400, 900);
 
   // Najbardziej prawdopodobny wariant WiFi Plug Pro / SmartESS 2341.
-  // Proba 4500 uwzglednia zerowe adresowanie dokumentowanego rejestru 4501.
+  // Najpierw pojedynczy, potwierdzony rejestr 4502 przy referencyjnych 2400 baud.
+  sendModbusRead(2400, 5, 4502, 1);
+  sendModbusRead(2400, 5, 4502, 13);
+  // Dalsze proby uwzgledniaja rozne interpretacje poczatku mapy rejestrow.
   sendModbusRead(9600, 5, 4500, 15);
   sendModbusRead(9600, 5, 4501, 15);
   sendModbusRead(2400, 5, 4500, 15);
@@ -295,9 +408,12 @@ void setup() {
   Serial.begin(115200);
   delay(1200);
   Serial.println();
-  Serial.println("Start za 3 sekundy. Otworz monitor portu 115200.");
-  delay(3000);
-  runAllTests();
+  Serial.println("ANENJI PROBE - tryb bezpiecznego oczekiwania (USB 115200)");
+  Serial.println("s = bierny podsluch obu pol TTL dongla @ 2400 przez 20 s");
+  Serial.println("9 = bierny podsluch obu pol TTL dongla @ 9600 przez 20 s");
+  Serial.println("r = aktywne zapytania do falownika przez MAX3232 (dongle wypiety)");
+  Serial.println("l = test petli MAX3232 (falownik i dongle wypiete)");
+  Serial.println("ESP niczego nie nada, dopoki nie wybierzesz polecenia.");
 }
 
 void loop() {
@@ -307,5 +423,8 @@ void loop() {
   }
   const char command = static_cast<char>(Serial.read());
   while (Serial.available()) Serial.read();
-  if (command == 'r' || command == 'R' || command == '\n' || command == '\r') runAllTests();
+  if (command == 'r' || command == 'R') runAllTests();
+  if (command == 'l' || command == 'L') runLoopbackTest();
+  if (command == 's' || command == 'S') dualPassiveSniff(2400);
+  if (command == '9') dualPassiveSniff(9600);
 }
