@@ -1,9 +1,11 @@
 #include <Arduino.h>
 
+#include "drivers/AnenjiProtocol.h"
+
 namespace {
 constexpr int kInverterRxPin = 33;  // ESP32 RX <- MAX3232 TTL TX
 constexpr int kInverterTxPin = 32;  // ESP32 TX -> MAX3232 TTL RX
-constexpr uint32_t kSniffDurationMs = 20000;
+constexpr uint32_t kSniffDurationMs = 40000;
 constexpr size_t kMaxResponse = 512;
 constexpr size_t kMaxResults = 16;
 
@@ -27,17 +29,7 @@ struct TestResult {
 TestResult results[kMaxResults];
 size_t resultCount = 0;
 
-uint16_t modbusCrc(const uint8_t* data, size_t length) {
-  uint16_t crc = 0xFFFF;
-  for (size_t index = 0; index < length; ++index) {
-    crc ^= data[index];
-    for (uint8_t bit = 0; bit < 8; ++bit) {
-      crc = (crc & 1U) ? static_cast<uint16_t>((crc >> 1U) ^ 0xA001U)
-                       : static_cast<uint16_t>(crc >> 1U);
-    }
-  }
-  return crc;
-}
+uint16_t modbusCrc(const uint8_t* data, size_t length) { return AnenjiProtocol::crc16(data, length); }
 
 uint16_t xmodemCrc(const uint8_t* data, size_t length) {
   uint16_t crc = 0;
@@ -378,8 +370,13 @@ void runAllTests() {
   passiveListen(9600, 900);
   passiveListen(2400, 900);
 
-  // Najbardziej prawdopodobny wariant WiFi Plug Pro / SmartESS 2341.
-  // Najpierw pojedynczy, potwierdzony rejestr 4502 przy referencyjnych 2400 baud.
+  configureUart(9600);
+  sendModbusRead(9600, 1, AnenjiProtocol::kFaultFirstRegister, AnenjiProtocol::kFaultRegisterCount);
+  sendModbusRead(9600, 1, AnenjiProtocol::kIdentityFirstRegister, AnenjiProtocol::kIdentityRegisterCount);
+  sendModbusRead(9600, 1, AnenjiProtocol::kLiveFirstRegister, AnenjiProtocol::kLiveRegisterCount);
+  sendModbusRead(9600, 1, AnenjiProtocol::kStatusFirstRegister, AnenjiProtocol::kStatusRegisterCount);
+
+  // Starszy wariant WiFi Plug Pro / SmartESS 2341 — zostawiony jako kontrola.
   sendModbusRead(2400, 5, 4502, 1);
   sendModbusRead(2400, 5, 4502, 13);
   // Dalsze proby uwzgledniaja rozne interpretacje poczatku mapy rejestrow.

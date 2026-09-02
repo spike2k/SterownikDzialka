@@ -72,7 +72,7 @@ constexpr uint16_t defaultLoadMinToggleMs = 20000;
 constexpr float chargeIdleAmps = 0.15f;
 constexpr size_t labelBytes = 21;
 constexpr uint32_t jkBaud = 115200;
-constexpr uint32_t anenjiBaud = 2400;
+constexpr uint32_t anenjiBaud = 9600;  // potwierdzone podsłuchem dongla, slave 1 FC03
 constexpr uint32_t pylonBaud = 115200;
 constexpr uint32_t busDebugIdleMs = 5000;
 }
