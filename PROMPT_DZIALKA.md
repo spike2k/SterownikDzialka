@@ -21,7 +21,7 @@ PIO na Ubuntu często jest tu, nie w PATH Pythona:
 ~/.platformio/penv/bin/pio device monitor --environment esp32dev
 ```
 
-Tester RS232 (osobny firmware): `-e anenji_probe`. Test parsera na hoście:
+Tester RS232 (osobny firmware): `-e anenji_probe` — tylko FC03 @ 9600; `l` tor MAX3232/kabla, `r` test falownika, `d` klon dongla, `9` podsłuch. Test parsera na hoście:
 
 ```bash
 g++ -std=c++17 -I src -o /tmp/test_anenji test/test_anenji_protocol.cpp src/drivers/AnenjiProtocol.cpp && /tmp/test_anenji
@@ -57,14 +57,15 @@ Stan w terenie (ostatnia sesja):
 - MQTT TLS error 5 jest osobnym tematem (cert/NTP).
 
 Moje zadanie:
-1. Wgrać aktualny esp32dev (dongle wypięty, RJ45 oryginalny).
-2. Szukać w monitorze ANENJI hello FC03 100 OK albo UART invert=ON.
-3. Jeśli nadal śmieci — zamienić TYLKO RX/TX GPIO32/33 w panelu WWW i zrestartować. Nie ruszać RJ45 1/2.
-4. Sukces: ANENJI OK PV=… load=… Porównać z aplikacją dongla.
+1. Wgrać anenji_probe (dongle wypięty).
+2. `l` — zwora T1OUT–R1IN na module, potem zwora RJ45 pin 1–2 na końcu kabla. Oba @ 9600, GPIO 33/32 = OK, zamiana 32/33 = błąd.
+3. Podłączyć falownik, RJ45 oryginalny (NIE zamieniać pin 1/2), `r`. Szukać [OK] i DEKOD. Probe sam kombinuje invert, zamianę TTL, wakeup i cykl dump.
+4. Jeśli OK — `d` (klon dongla) i porównać PV/load z aplikacją. Potem wgrać esp32dev.
+5. Sukces firmware: ANENJI OK PV=… load=…
 
 Prowadź krótko, krok po kroku, z naciskiem na bezpieczne połączenia. Nie wykonuj komend zapisu do falownika.
 ```
 
 ## Co zabrać z terminala
 
-Wklej blok od startu `ANENJI SMG-II` / `ANENJI hello` aż do kilku cykli poll. Nie wycinaj `FAIL`, zer ani `MQTT TLS error`. Przy probe: cały `PODSLUCH DONGLA` … `KONIEC PODSLUCHU`.
+Wklej blok od startu `ANENJI SMG-II` / `ANENJI hello` aż do kilku cykli poll. Nie wycinaj `FAIL`, zer ani `MQTT TLS error`. Przy probe: cały przebieg `l` / `r` / `d` wraz z `PODSUMOWANIE` i `DIAGNOZA`; przy `9` cały `PODSLUCH DONGLA` … `KONIEC PODSLUCHU`.

@@ -70,10 +70,10 @@ Polecenie `upload` uruchamiaj dopiero po podłączeniu właściwego ESP32 i spra
 
 ### Jednorazowy test protokołu ANENJI
 
-Środowisko `anenji_probe` wgrywa samodzielny tester RS232 zamiast normalnego sterownika. Tester wysyła wyłącznie zapytania odczytowe dla spotykanych protokołów SmartESS/Modbus `2341`, WiFi Plug Pro `8851` i PIP/Sumry, a odpowiedzi wypisuje jako HEX i ASCII przez USB 115200.
+Środowisko `anenji_probe` wgrywa samodzielny tester RS232 zamiast normalnego sterownika. Tester mówi wyłącznie **Modbus RTU 9600 8N1, slave 1, FC03** (protokół potwierdzony podsłuchem dongla). Nie wysyła FC06/FC10. Odpowiedzi to HEX plus klasyfikacja `[OK]` / `[BAJTY]` / `[ECHO]` / `[CISZA]`.
 
 1. Wypnij fabryczny WiFi Plug Pro — podczas testu nie może być drugim urządzeniem nadrzędnym na RS232.
-2. Połącz falownik z ESP32 przez MAX3232 3,3 V. Kierunki sygnałów dla zgodnych falowników POW-HVM/ANENJI są następujące: pin 1 RJ45 wysyła dane z falownika do `R1IN` MAX3232, pin 2 RJ45 odbiera dane z `T1OUT` MAX3232, a pin 8 to GND. Po stronie TTL `R1OUT` idzie do GPIO 33 (RX ESP), a GPIO 32 (TX ESP) idzie do `T1IN`. Oznaczenia RX/TX w części instrukcji producentów są podawane z perspektywy kabla/dongla, dlatego należy łączyć według kierunku danych, a nie samego napisu.
+2. Połącz falownik z ESP32 przez MAX3232 3,3 V. Kierunki: pin 1 RJ45 (TX falownika) → `R1IN`, pin 2 RJ45 (RX falownika) ← `T1OUT`, pin 8 = GND. TTL: `R1OUT` → GPIO 33, GPIO 32 → `T1IN`. **Nie zamieniaj RJ45 pin 1/2** — w terenie to dawało ciszę. Oznaczenia RX/TX producenta bywają z perspektywy kabla/dongla.
 3. Zbuduj i wgraj tester:
 
 ```powershell
@@ -82,11 +82,14 @@ python -m platformio run -e anenji_probe -t upload
 python -m platformio device monitor -b 115200
 ```
 
-Po uruchomieniu tester bezpiecznie czeka i niczego nie nadaje. Wpisz `r` i Enter, aby rozpocząć aktywny test RS232. Po około 30 sekundach skopiuj cały blok `PODSUMOWANIE` oraz wszystkie odpowiedzi oznaczone `[OK]` albo `[BAJTY]`. Brak odpowiedzi we wszystkich próbach najczęściej oznacza zamienione kierunki RX/TX, brak wspólnej masy albo błędną stronę konwertera MAX3232.
+Po starcie tester czeka i niczego nie nadaje. Komendy:
 
-Tor ESP32–MAX3232 można sprawdzić bez falownika. Odłącz RJ45, zewrzyj na stronie RS232 wyjście `T1OUT` z wejściem `R1IN`, uruchom monitor i wpisz `l` oraz Enter. Tester wysyła wzorzec przy 2400 i 9600 baud; oba wyniki powinny mieć postać `WYNIK LOOPBACK: OK`. Ten test obejmuje UART ESP32 oraz oba kierunki konwertera MAX3232.
+- **`l`** — test toru ESP ↔ MAX3232 ↔ kabel. Falownik i dongle wypięte. Uruchom dwa razy: **A.** zewrzyj `T1OUT`–`R1IN` na module (chip); **B.** wtyk RJ45 w MAX3232, na drugim końcu zewrzyj pin 1 z pin 2 (kabel). Tylko 9600. Domyślne GPIO 33/32 ma dać `WYNIK LOOPBACK: OK`; zamienione 32/33 ma paść (jeśli TTL jest zgodne z firmware).
+- **`r`** — pełny test z falownikiem: macierz UART (invert / zamiana GPIO) oraz warianty danych (bez wakeup, z wakeup `01 AA`, cykl dump). RJ45 1/2 bez zmian.
+- **`d`** — klon dongla: ten sam cykl FC03 co w sniffie, 3 obroty, bez wakeup. Przy OK wypisuje `DEKOD` (PV/load).
+- **`9`** — bierny podsłuch obu pól TTL dongla @ 9600 z parserem FC03. Dongle w falowniku, **bez MAX3232**, tylko GND + pad TX→GPIO33 + pad RX→GPIO32; nie łącz 3.3 V ani `DL`.
 
-Można też podsłuchać działający WiFi Plug Pro po stronie TTL. Dongle pozostaje normalnie podłączony do falownika i zasilany przez falownik. Połącz wyłącznie trzy przewody: `GND` dongla z `GND` ESP32, pole `TX` dongla z GPIO 33 i pole `RX` dongla z GPIO 32. **Nie używaj tutaj MAX3232, nie łącz pola 3.3 V i nie dotykaj `DL`.** Oba GPIO ESP32 pracują w tym teście wyłącznie jako wejścia, więc nie zakłócają rozmowy dongla z falownikiem. W monitorze wpisz `s`, aby jednocześnie podsłuchiwać obie linie przez 20 sekund przy 2400 baud. Jeśli nie pojawią się sensowne ramki, wpisz `9`, aby powtórzyć podsłuch przy 9600 baud. Nazwy TX/RX na płytce nie muszą być interpretowane poprawnie — raport wyświetla obie linie oddzielnie.
+Skopiuj cały blok `PODSUMOWANIE` oraz `DIAGNOZA`. Sukces = `[OK]` i linia `DEKOD`. Cisza wszędzie → najpierw `l`. Śmieci `00 02` ≈ przesunięte `01 03` → invert albo TTL 32↔33, nie RJ45.
 
 Po diagnostyce normalny firmware przywraca:
 
