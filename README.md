@@ -85,11 +85,11 @@ python -m platformio device monitor -b 115200
 Po starcie tester czeka i niczego nie nadaje. Komendy:
 
 - **`l`** — test toru ESP ↔ MAX3232 ↔ kabel. Falownik i dongle wypięte. Uruchom dwa razy: **A.** zewrzyj `T1OUT`–`R1IN` na module (chip); **B.** wtyk RJ45 w MAX3232, na drugim końcu zewrzyj pin 1 z pin 2 (kabel). Tylko 9600. Domyślne GPIO 33/32 ma dać `WYNIK LOOPBACK: OK`; zamienione 32/33 ma paść (jeśli TTL jest zgodne z firmware).
-- **`r`** — pełny test z falownikiem: macierz UART (invert / zamiana GPIO) oraz warianty danych (bez wakeup, z wakeup `01 AA`, cykl dump). RJ45 1/2 bez zmian.
+- **`r`** — pełny test z falownikiem na jedynym poprawnym torze `RX=GPIO33`, `TX=GPIO32`, bez inwersji; następnie warianty danych bez wakeup, z wakeup `01 AA` i cykl dump. UART uruchamia się już przy starcie testera, aby GPIO32 nie pływało, a `T1OUT` MAX3232 pozostawało ujemne w spoczynku.
 - **`d`** — klon dongla: ten sam cykl FC03 co w sniffie, 3 obroty, bez wakeup. Przy OK wypisuje `DEKOD` (PV/load).
 - **`9`** — bierny podsłuch obu pól TTL dongla @ 9600 z parserem FC03. Dongle w falowniku, **bez MAX3232**, tylko GND + pad TX→GPIO33 + pad RX→GPIO32; nie łącz 3.3 V ani `DL`.
 
-Skopiuj cały blok `PODSUMOWANIE` oraz `DIAGNOZA`. Sukces = `[OK]` i linia `DEKOD`. Cisza wszędzie → najpierw `l`. Śmieci `00 02` ≈ przesunięte `01 03` → invert albo TTL 32↔33, nie RJ45.
+Skopiuj cały blok `PODSUMOWANIE` oraz `DIAGNOZA`, w tym ewentualną linię `UART ERR`. Sukces = `[OK]` i linia `DEKOD`. Cisza wszędzie → najpierw `l`, a potem sprawdzenie rzeczywistych kierunków RS232 miernikiem; loopback nie wykrywa zamiany TX/RX.
 
 Po diagnostyce normalny firmware przywraca:
 

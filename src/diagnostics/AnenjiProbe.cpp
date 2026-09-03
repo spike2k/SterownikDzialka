@@ -22,6 +22,12 @@ constexpr size_t kMaxRegs = 32;
 HardwareSerial inverter(2);
 HardwareSerial secondSniffer(1);
 
+volatile uint32_t uartBreakErrors = 0;
+volatile uint32_t uartBufferFullErrors = 0;
+volatile uint32_t uartFifoOverflowErrors = 0;
+volatile uint32_t uartFrameErrors = 0;
+volatile uint32_t uartParityErrors = 0;
+
 struct UartConfig {
   int rxPin;
   int txPin;
@@ -50,14 +56,8 @@ struct RegRead {
   const char* name;
 };
 
-constexpr UartConfig kUartMatrix[] = {
-    {kDefaultRxPin, kDefaultTxPin, false, "A RX33/TX32 invert=off"},
-    {kDefaultRxPin, kDefaultTxPin, true, "B RX33/TX32 invert=on"},
-    {kDefaultTxPin, kDefaultRxPin, false, "C RX32/TX33 invert=off"},
-    {kDefaultTxPin, kDefaultRxPin, true, "D RX32/TX33 invert=on"},
-};
-
-constexpr UartConfig kDefaultUart = kUartMatrix[0];
+constexpr UartConfig kDefaultUart = {kDefaultRxPin, kDefaultTxPin, false,
+                                     "RX33/TX32 invert=off"};
 
 constexpr RegRead kHelloRead = {AnenjiProtocol::kFaultFirstRegister, AnenjiProtocol::kFaultRegisterCount,
                                 "hello 100/3"};
@@ -118,9 +118,52 @@ void printBytes(const char* label, const uint8_t* data, size_t length) {
 
 void printMenu() {
   Serial.println("l = test toru ESP/MAX3232/kabla (falownik i dongle wypiete, zwora)");
-  Serial.println("r = pelny test polaczenia z falownikiem (dongle wypiety, RJ45 1/2 bez zamiany)");
+  Serial.println("r = test polaczenia z falownikiem na poprawnym torze RX33/TX32");
   Serial.println("d = klon dongla: cykl FC03 ze sniffu, 3 obroty, bez wakeup");
   Serial.println("9 = bierny podsluch obu pol TTL dongla @ 9600 FC03");
+}
+
+void resetUartErrors() {
+  uartBreakErrors = 0;
+  uartBufferFullErrors = 0;
+  uartFifoOverflowErrors = 0;
+  uartFrameErrors = 0;
+  uartParityErrors = 0;
+}
+
+void onUartError(hardwareSerial_error_t error) {
+  switch (error) {
+    case UART_BREAK_ERROR:
+      ++uartBreakErrors;
+      break;
+    case UART_BUFFER_FULL_ERROR:
+      ++uartBufferFullErrors;
+      break;
+    case UART_FIFO_OVF_ERROR:
+      ++uartFifoOverflowErrors;
+      break;
+    case UART_FRAME_ERROR:
+      ++uartFrameErrors;
+      break;
+    case UART_PARITY_ERROR:
+      ++uartParityErrors;
+      break;
+    case UART_NO_ERROR:
+    default:
+      break;
+  }
+}
+
+void printUartErrors() {
+  const uint32_t total = uartBreakErrors + uartBufferFullErrors + uartFifoOverflowErrors +
+                         uartFrameErrors + uartParityErrors;
+  if (!total) return;
+  Serial.printf("UART ERR: frame=%lu parity=%lu break=%lu fifo=%lu buffer=%lu\n",
+                static_cast<unsigned long>(uartFrameErrors),
+                static_cast<unsigned long>(uartParityErrors),
+                static_cast<unsigned long>(uartBreakErrors),
+                static_cast<unsigned long>(uartFifoOverflowErrors),
+                static_cast<unsigned long>(uartBufferFullErrors));
 }
 
 void remember(const String& name, ResultKind kind, size_t bytes) {
@@ -133,8 +176,10 @@ void openUart(const UartConfig& config) {
   delay(50);
   inverter.setRxBufferSize(kMaxResponse * 2);
   inverter.begin(kBaud, SERIAL_8N1, config.rxPin, config.txPin, config.invert);
+  inverter.onReceiveError(onUartError);
   delay(80);
   while (inverter.available()) inverter.read();
+  resetUartErrors();
 }
 
 void flushRx() {
@@ -195,7 +240,7 @@ bool looksLikeShiftedFc03(const Capture& capture) {
 const char* garbageHint(const Capture& capture) {
   static const uint8_t kWakeJunk[] = {0xFE, 0x00, 0xFC, 0x00};
   if (looksLikeShiftedFc03(capture)) {
-    return "start 00 02 ~= przesuniete 01 03 (invert / framing UART, jak w terenie)";
+    return "start 00 02 ~= przesuniete 01 03 (blad ramki / zaklocenia, jak w terenie)";
   }
   if (isAllValue(capture, 0xFF) || capture.data[0] == 0xFF) {
     return "FF na starcie — jak po wakeup-first w terenie";
@@ -281,10 +326,12 @@ void showCapture(const String& name, const Capture& capture, ResultKind kind, ui
   Serial.println(" 8N1 ---");
   if (!capture.length) {
     Serial.println("RX: cisza");
+    printUartErrors();
     remember(name, ResultKind::Silence, 0);
     return;
   }
   printBytes("RX", capture.data, capture.length);
+  printUartErrors();
   if (capture.overflow) Serial.println("UWAGA: odpowiedz dluzsza niz bufor; koniec zostal uciety.");
   Serial.print("czas TX->RX: ");
   Serial.print(capture.firstByteMs);
@@ -319,6 +366,7 @@ void queryFc03(const UartConfig& uart, const RegRead& read, bool reopen) {
   }
   if (reopen) openUart(uart);
   else flushRx();
+  resetUartErrors();
 
   const String name = String(uart.name) + " " + read.name;
   Serial.println();
@@ -358,6 +406,7 @@ void sendWakeup(const UartConfig& uart, bool reopen) {
 
 void listenPassive(const UartConfig& uart) {
   openUart(uart);
+  resetUartErrors();
   Serial.println();
   Serial.print("--- pasywny nasluch ");
   Serial.print(uart.name);
@@ -388,11 +437,13 @@ bool loopbackOnce(const UartConfig& uart, const char* label, const uint8_t* patt
   Serial.println(uart.name);
   printBytes("TX", pattern, length);
   flushRx();
+  resetUartErrors();
   inverter.write(pattern, length);
   inverter.flush();
   const Capture capture = captureResponse(kLoopbackTimeoutMs, kRxIdleMs);
   if (capture.length) printBytes("RX", capture.data, capture.length);
   else Serial.println("RX: cisza");
+  printUartErrors();
   const bool ok = bytesEqual(capture.data, capture.length, pattern, length);
   Serial.println(ok ? "WYNIK LOOPBACK: OK" : "WYNIK LOOPBACK: BLAD");
   return ok;
@@ -420,23 +471,16 @@ void runLoopbackTest() {
   Serial.println("Predkosc tylko 9600 8N1 (potwierdzona). Invert nie jest testowany w loopbacku.");
   Serial.println("===========================================================");
 
-  const UartConfig swapped{kDefaultTxPin, kDefaultRxPin, false, "TTL zamienione RX32/TX33"};
   const bool defaultOk = loopbackConfig(kDefaultUart);
-  const bool swappedOk = loopbackConfig(swapped);
 
   Serial.println();
   Serial.println("================ WYNIK TORU ================");
-  if (defaultOk && !swappedOk) {
+  if (defaultOk) {
     Serial.println("TTL zgodne z firmware: R1OUT->GPIO33, T1IN<-GPIO32.");
     Serial.println("Jesli to przebieg A: chip MAX3232 i UART ESP dzialaja.");
     Serial.println("Jesli to przebieg B: kabel RJ45 pin 1/2 tez przepuszcza oba kierunki.");
-  } else if (!defaultOk && swappedOk) {
-    Serial.println("Przewody TTL sa zamienione. Zamień GPIO32/33 (R1OUT ma isc na GPIO33).");
-    Serial.println("RJ45 pin 1/2 NIE ruszaj — w terenie zamiana 1/2 dala cisze.");
-  } else if (defaultOk && swappedOk) {
-    Serial.println("Obie pary GPIO odpowiadaja — to nie powinno sie zdarzyc. Sprawdz zwore i masę.");
   } else {
-    Serial.println("Brak petli na obu parach GPIO.");
+    Serial.println("Brak petli na poprawnym torze RX33/TX32.");
     Serial.println("Przebieg A fail: ESP, VCC 3.3 V, GND, kondensatory charge-pump, T1OUT-R1IN.");
     Serial.println("Przebieg B fail przy A OK: przerwa w kablu albo zly pin na wtyku RJ45.");
   }
@@ -462,13 +506,13 @@ void printDiagnosis() {
     Serial.println("DIAGNOZA: echo TX — zostawiona zwora loopback. Zdejmij ja i wpinaj falownik.");
   } else if (junk) {
     Serial.println("DIAGNOZA: falownik gada, ale UART nie sklada FC03.");
-    Serial.println("00 02 ~= przesuniete 01 03: invert albo zamiana TTL 32/33. RJ45 pin 1/2 zostaw.");
-    Serial.println("Najpierw `l` (chip, potem kabel). Potem `r` jeszcze raz.");
+    Serial.println("Sprawdz UART ERR, mase, poziomy RS232 i prowadzenie kabla. Nie wlaczaj invert przez MAX3232.");
+    Serial.println("Najpierw `l` (chip, potem kabel), potem `r` jeszcze raz.");
   } else if (traffic) {
     Serial.println("DIAGNOZA: sa bajty, ale nie FC03. Skopiuj caly raport.");
   } else {
     Serial.println("DIAGNOZA: cisza. Zrob `l` (chip A, kabel B), sprawdz mase i 3.3 V MAX3232.");
-    Serial.println("Nie zamieniaj RJ45 pin 1/2 — to w terenie dawalo cisze.");
+    Serial.println("Loopback nie sprawdza kierunkow. T1OUT MAX ma isc do wejscia falownika, TX falownika do R1IN.");
   }
 }
 
@@ -489,15 +533,6 @@ void printSummary() {
   printDiagnosis();
   Serial.println("Wpisz r / d / l / 9.");
   Serial.println("================================================");
-}
-
-bool configHadBytes(const char* uartName) {
-  for (size_t index = 0; index < resultCount; ++index) {
-    if (results[index].name.startsWith(uartName) && results[index].kind != ResultKind::Silence) {
-      return true;
-    }
-  }
-  return false;
 }
 
 void runDataVariants(const UartConfig& uart) {
@@ -524,28 +559,20 @@ void runConnectionTest() {
   Serial.println("================================================");
   Serial.println("ANENJI PROBE - pelny test polaczenia");
   Serial.println("Format: Modbus RTU 9600 8N1 slave 1 wylacznie FC03");
-  Serial.println("Dongle wypiety. MAX3232 3.3 V. RJ45 pin 1/2 BEZ zamiany.");
+  Serial.println("Dongle wypiety. MAX3232 3.3 V. T1OUT->wejscie falownika, wyjscie falownika->R1IN.");
   Serial.printf("Domyslnie RX=%d TX=%d (jak firmware)\n", kDefaultRxPin, kDefaultTxPin);
   Serial.println("================================================");
 
-  for (const UartConfig& uart : kUartMatrix) {
-    Serial.println();
-    Serial.print("=== macierz UART ");
-    Serial.print(uart.name);
-    Serial.println(" ===");
-    listenPassive(uart);
-    const ResultKind helloKind = queryFc03Kind(uart, kHelloRead, false);
-    if (helloKind == ResultKind::Valid) {
-      Serial.println("hello OK — czytam live 200/22 i status 223/13");
-      tryLiveStatus(uart);
-    }
+  Serial.println();
+  Serial.println("=== jedyny poprawny tor RX33/TX32 invert=off ===");
+  listenPassive(kDefaultUart);
+  const ResultKind helloKind = queryFc03Kind(kDefaultUart, kHelloRead, false);
+  if (helloKind == ResultKind::Valid) {
+    Serial.println("hello OK — czytam live 200/22 i status 223/13");
+    tryLiveStatus(kDefaultUart);
   }
 
   runDataVariants(kDefaultUart);
-  for (size_t index = 1; index < sizeof(kUartMatrix) / sizeof(kUartMatrix[0]); ++index) {
-    const UartConfig& uart = kUartMatrix[index];
-    if (configHadBytes(uart.name)) runDataVariants(uart);
-  }
 
   printSummary();
 }
@@ -571,21 +598,12 @@ void runDongleClone() {
   Serial.println("================================================");
   Serial.println("ANENJI PROBE - klon dongla (sniff WiFi Plug Pro)");
   Serial.println("9600 8N1 slave 1 FC03, RX=33 TX=32, bez invert, bez wakeup");
-  Serial.println("Dongle wypiety. RJ45 pin 1/2 bez zamiany.");
+  Serial.println("Dongle wypiety. Sprawdz kierunki RS232; loopback nie wykrywa ich zamiany.");
   Serial.println("================================================");
 
   const ResultKind first = queryFc03Kind(kDefaultUart, kHelloRead, true);
   if (first == ResultKind::Junk || first == ResultKind::Silence) {
-    Serial.println();
-    Serial.println("Pierwszy 100/3 nie jest FC03 — jedna proba invert=on, potem cykl.");
-    const UartConfig inverted{kDefaultRxPin, kDefaultTxPin, true, "klon invert=on"};
-    const ResultKind invertedHello = queryFc03Kind(inverted, kHelloRead, true);
-    if (invertedHello == ResultKind::Valid || invertedHello == ResultKind::Junk ||
-        invertedHello == ResultKind::Exception) {
-      runDumpCycles(inverted, kDongleCycles);
-      printSummary();
-      return;
-    }
+    Serial.println("Pierwszy 100/3 nie jest poprawnym FC03; pozostaje ten sam fizyczny tor.");
   }
 
   runDumpCycles(kDefaultUart, kDongleCycles);
@@ -699,9 +717,13 @@ void dualPassiveSniff() {
 
 void setup() {
   Serial.begin(115200);
-  delay(1200);
+  // Uruchom UART od razu: TX GPIO32 ma stan idle HIGH, wiec T1OUT MAX3232
+  // pozostaje ujemny także przed wybraniem polecenia z menu.
+  openUart(kDefaultUart);
+  delay(1000);
   Serial.println();
   Serial.println("ANENJI PROBE - oczekiwanie (USB 115200), tylko FC03 @ 9600");
+  Serial.println("UART falownika aktywny od startu: GPIO32 TX idle=HIGH, MAX T1OUT powinien byc ujemny.");
   printMenu();
   Serial.println("ESP niczego nie nada, dopoki nie wybierzesz polecenia.");
 }

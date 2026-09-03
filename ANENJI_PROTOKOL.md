@@ -132,7 +132,7 @@ g++ -std=c++17 -I src -o /tmp/test_anenji test/test_anenji_protocol.cpp src/driv
 - `AnenjiProtocol` — CRC, budowa/parsowanie FC03, dekodowanie 200/223, **bez helperów zapisu**
 - `AnenjiDriver` — baud 9600 (`AppConfig.h`), poll live + status, moc 0–5000 W
 - `hello()`: (1) UART bez invert + FC03 100, (2) `HardwareSerial` invert=true, (3) invert off + jeden wakeup `01 AA`, (4) log: zostaw RJ45, zamień TTL 32/33 w panelu
-- `anenji_probe` — wyłącznie 9600 8N1 slave 1 FC03 (bez 2400/PIP/8851). `l` loopback chip+kabel, `r` macierz UART + wake/dump, `d` klon cyklu dongla, `9` podsłuch TTL z parserem FC03
+- `anenji_probe` — wyłącznie 9600 8N1 slave 1 FC03 (bez 2400/PIP/8851). UART startuje od razu, aby TX GPIO32 miał stan idle HIGH. `l` sprawdza poprawny tor chip+kabel, `r` testuje wyłącznie RX33/TX32 bez inwersji + wake/dump, `d` klonuje cykl dongla, a `9` podsłuchuje TTL z parserem FC03. Tester raportuje też sprzętowe błędy UART.
 - PIO: `~/.platformio/penv/bin/pio` (niekoniecznie `python3 -m platformio`)
 
 ## Stan w terenie (2026-09-02) — ESP + MAX3232, dongle wypięty
@@ -153,7 +153,7 @@ Nie zamieniać ponownie pinów 1/2 na RJ45.
 
 `MQTT TLS error 5` jest osobnym problemem (cert/NTP), nie RS232.
 
-Te logi były sprzed invert-fallback w driverze. Teraz najpierw `anenji_probe` (`l`, potem `r`) — macierz UART robi invert i zamianę TTL sama. `esp32dev` dopiero po `[OK]`.
+Te logi były sprzed invert-fallback w driverze. Teraz najpierw `anenji_probe` (`l`, potem `r`). Probe celowo nie odwraca UART i nie zamienia GPIO programowo: MAX3232 już odwraca poziomy, a zmiana funkcji GPIO nie zamienia fizycznych torów `T1IN/R1OUT`. `esp32dev` dopiero po `[OK]`.
 
 MAX3232 na **3.3 V**, wspólna masa, kondensatory charge-pump. GPIO32/33 na ESP32-WROVER to 32 kHz XTAL — DevKit WROOM powinien być OK.
 
@@ -163,5 +163,5 @@ MAX3232 na **3.3 V**, wspólna masa, kondensatory charge-pump. GPIO32/33 na ESP3
 2. `l` ze zworą `T1OUT`–`R1IN` na module, potem `l` ze zworą RJ45 pin 1–2 na końcu kabla. Falownik wypięty.
 3. Podłączyć falownik (dongle wypięty, RJ45 oryginalny), `r`. Szukać `[OK]` / `DEKOD`.
 4. Jeśli OK — `d` i porównać PV/load z aplikacją dongla.
-5. Nadal śmieci po `r` → zostaw RJ45 1/2; probe sam próbuje invert i zamianę TTL.
+5. Nadal śmieci po `r` → zapisać bajty oraz liczniki `UART ERR`; nie uruchamiać programowej inwersji przez MAX3232.
 6. Po sukcesie wgrać `esp32dev`. Nie ruszać zapisów do falownika.

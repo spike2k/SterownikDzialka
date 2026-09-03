@@ -52,14 +52,14 @@ Co jest już pewne (podsłuch dongla, nie zgadujemy):
 
 Stan w terenie (ostatnia sesja):
 - Zamiana RJ45 pin 1/2 = cisza. Przywrócony oryginał = ruch, ale złe ramki (00 02, FF, 00 00, FE 00 FC 00). Kierunek RJ45 zostawiamy.
-- Falownik odpowiada, UART ESP nie składa FC03 (CRC/adres). Podejrzenie: invert UART albo zamiana TTL GPIO32/33, nie RJ45.
+- Falownik wcześniej odpowiadał śmieciami, ale UART ESP nie składał FC03; później pojawiła się całkowita cisza. Najpierw sprawdzić rzeczywiste kierunki RS232 miernikiem, bo loopback nie wykrywa zamiany TX/RX.
 - hello() w AnenjiDriver: najpierw 9600 bez invert + FC03 100, potem invert=true, potem wakeup 01 AA, potem log „zamień TTL w panelu”.
 - MQTT TLS error 5 jest osobnym tematem (cert/NTP).
 
 Moje zadanie:
 1. Wgrać anenji_probe (dongle wypięty).
-2. `l` — zwora T1OUT–R1IN na module, potem zwora RJ45 pin 1–2 na końcu kabla. Oba @ 9600, GPIO 33/32 = OK, zamiana 32/33 = błąd.
-3. Podłączyć falownik, RJ45 oryginalny (NIE zamieniać pin 1/2), `r`. Szukać [OK] i DEKOD. Probe sam kombinuje invert, zamianę TTL, wakeup i cykl dump.
+2. `l` — zwora T1OUT–R1IN na module, potem zwora RJ45 pin 1–2 na końcu kabla. Oba @ 9600 na stałym torze RX33/TX32. Loopback sprawdza ciągłość, ale nie potwierdza kierunków danych.
+3. Podłączyć falownik i uruchomić `r`. Szukać `[OK]`, `DEKOD` oraz `UART ERR`. Probe używa wyłącznie elektrycznie poprawnego toru RX33/TX32 bez inwersji; nie wykonuje już mylącej programowej zamiany GPIO.
 4. Jeśli OK — `d` (klon dongla) i porównać PV/load z aplikacją. Potem wgrać esp32dev.
 5. Sukces firmware: ANENJI OK PV=… load=…
 
