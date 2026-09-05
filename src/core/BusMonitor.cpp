@@ -10,22 +10,19 @@ String lower(String text) {
 }
 }
 
-void BusMonitor::begin(Settings& settings, JkBmsDriver& jk, AnenjiDriver& anenji, PylontechEmulator& pylon) {
+void BusMonitor::begin(Settings& settings, JkBmsBleDriver& jk, AnenjiDriver& anenji, PylontechEmulator& pylon) {
   settings_ = &settings;
   jk_ = &jk;
   anenji_ = &anenji;
   pylon_ = &pylon;
-  lastJkMs_ = lastAnenjiMs_ = lastPylonMs_ = millis();
-  Serial.println("Debug RS: help | debug jk | debug inv | debug pylon | debug off");
+  lastAnenjiMs_ = lastPylonMs_ = millis();
+  Serial.println("Debug: help | debug jk | debug inv | debug pylon | debug off");
   printStatus();
 }
 
 void BusMonitor::tick() {
   if (!settings_) return;
   pollConsole();
-  if (settings_->values.debugJk) {
-    dumpUart("JK", jk_->serial(), Config::jkBaud, settings_->values.jkRxPin, lastJkMs_);
-  }
   if (settings_->values.debugAnenji) {
     dumpUart("INV", anenji_->serial(), Config::anenjiBaud, settings_->values.anenjiRxPin, lastAnenjiMs_);
   }
@@ -94,20 +91,21 @@ void BusMonitor::handleCommand(String line) {
     Serial.println(*flag ? ": debug ON" : ": debug OFF");
   }
 
+  if (jk_) jk_->setVerbose(settings_->values.debugJk);
+
   settings_->save();
-  lastJkMs_ = lastAnenjiMs_ = lastPylonMs_ = millis();
+  lastAnenjiMs_ = lastPylonMs_ = millis();
   printStatus();
 }
 
 void BusMonitor::printHelp() const {
-  Serial.println("Komendy debug RS (USB 115200):");
+  Serial.println("Komendy debug (USB 115200):");
   Serial.println("  debug           status");
-  Serial.println("  debug jk        wl/wyl JK BMS RS485");
+  Serial.println("  debug jk        wl/wyl skan/services/notify JK BLE");
   Serial.println("  debug inv       wl/wyl falownik RS232");
   Serial.println("  debug pylon     wl/wyl Pylontech RS485");
   Serial.println("  debug on|off    wszystkie");
-  Serial.println("JK i falownik: hex ramek RX. Pylon: zliczanie zboczy na RX");
-  Serial.println("(ESP32 ma 3 UART-y, USB zajmuje jeden, Pylon nie ma wolnego UART).");
+  Serial.println("JK: BLE notify HEX. Falownik: ramki RS232. Pylon: tylko nasluch zboczy.");
 }
 
 void BusMonitor::printStatus() const {

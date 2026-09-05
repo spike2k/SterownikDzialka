@@ -8,7 +8,7 @@
 #include "core/Settings.h"
 #include "core/Telemetry.h"
 #include "drivers/AnenjiDriver.h"
-#include "drivers/JkBmsDriver.h"
+#include "drivers/JkBmsBleDriver.h"
 #include "drivers/PylontechEmulator.h"
 #include "services/NetworkService.h"
 #include "web/WebPanel.h"
@@ -17,7 +17,8 @@ Settings settings;
 Telemetry telemetry;
 RelayController relays;
 InputMonitor inputs;
-JkBmsDriver jkBms;
+BatteryData batteryData;
+JkBmsBleDriver jkBms;
 AnenjiDriver anenji;
 PylontechEmulator pylontech;
 NetworkService network;
@@ -39,12 +40,15 @@ void setup() {
     Serial.printf(" %d", settings.values.loads[index].pin);
   }
   Serial.println();
-  Serial.printf("GPIO JK RX/TX: %d %d | ANENJI RX/TX: %d %d | Pylon RX/TX: %d %d\n",
-                settings.values.jkRxPin, settings.values.jkTxPin, settings.values.anenjiRxPin,
+  Serial.printf("JK BLE MAC: %s | ANENJI RX/TX: %d %d | Pylon RX/TX: %d %d\n",
+                settings.values.jkBmsMac[0] ? settings.values.jkBmsMac : "AUTO", settings.values.anenjiRxPin,
                 settings.values.anenjiTxPin, settings.values.pylonRxPin, settings.values.pylonTxPin);
   relays.begin(settings);
   inputs.begin(settings);
-  jkBms.begin(settings);
+  JkBmsBleDriver::Config jkConfig;
+  jkConfig.mac = settings.values.jkBmsMac;
+  jkConfig.verbose = settings.values.debugJk;
+  jkBms.begin(jkConfig);
   anenji.begin(settings);
   pylontech.begin(settings);
   busMonitor.begin(settings, jkBms, anenji, pylontech);
@@ -55,8 +59,18 @@ void setup() {
 void loop() {
   esp_task_wdt_reset();
 
+  jkBms.tick(batteryData);
+  telemetry.jkOnline = batteryData.online;
+  if (batteryData.online) {
+    telemetry.batterySoc = batteryData.socPercent;
+    telemetry.batteryVoltageV = batteryData.packVoltageV;
+    telemetry.batteryCurrentA = batteryData.currentA;
+    telemetry.cellVoltageV = batteryData.cellVoltageV;
+    telemetry.cellCount = batteryData.cellCount;
+    telemetry.updatedAtMs = batteryData.lastUpdateMs;
+  }
+
   if (millis() - lastTelemetryMs >= Config::telemetryIntervalMs) {
-    jkBms.poll(telemetry);
     anenji.poll(telemetry);
     lastTelemetryMs = millis();
   }
@@ -66,7 +80,7 @@ void loop() {
   const float pvPowerW = telemetry.anenjiOnline ? telemetry.pvPowerW : 0;
   const float loadPowerW = telemetry.anenjiOnline ? telemetry.loadPowerW : 0;
   relays.tick(telemetryHealthy, pvPowerW, loadPowerW);
-  pylontech.tick(telemetry);
+  pylontech.tick(batteryData);
   network.tick(telemetry);
   busMonitor.tick();
   webPanel.tick();

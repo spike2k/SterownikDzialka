@@ -2,12 +2,12 @@
 
 #include "core/Settings.h"
 #include "drivers/AnenjiDriver.h"
-#include "drivers/JkBmsDriver.h"
+#include "drivers/JkBmsBleDriver.h"
 #include "drivers/PylontechEmulator.h"
 
 class BusMonitor {
  public:
-  void begin(Settings& settings, JkBmsDriver& jk, AnenjiDriver& anenji, PylontechEmulator& pylon);
+  void begin(Settings& settings, JkBmsBleDriver& jk, AnenjiDriver& anenji, PylontechEmulator& pylon);
   void tick();
 
  private:
@@ -20,11 +20,10 @@ class BusMonitor {
   static void printDump(const char* name, const uint8_t* data, size_t length);
 
   Settings* settings_ = nullptr;
-  JkBmsDriver* jk_ = nullptr;
+  JkBmsBleDriver* jk_ = nullptr;
   AnenjiDriver* anenji_ = nullptr;
   PylontechEmulator* pylon_ = nullptr;
   String line_;
-  uint32_t lastJkMs_ = 0;
   uint32_t lastAnenjiMs_ = 0;
   uint32_t lastPylonMs_ = 0;
 };

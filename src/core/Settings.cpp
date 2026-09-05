@@ -5,7 +5,7 @@
 
 namespace {
 constexpr uint32_t kMagic = 0x314D5345;
-constexpr uint16_t kVersion = 3;
+constexpr uint16_t kVersion = 4;
 Preferences prefs;
 
 void terminate(char* text, size_t size) {
@@ -103,6 +103,7 @@ bool Settings::load() {
   terminate(values.mqttHost, sizeof(values.mqttHost));
   terminate(values.mqttUser, sizeof(values.mqttUser));
   terminate(values.mqttPassword, sizeof(values.mqttPassword));
+  terminate(values.jkBmsMac, sizeof(values.jkBmsMac));
   for (size_t index = 0; index < Config::relayCount; ++index) {
     terminate(values.relayNames[index], Config::labelBytes);
   }
@@ -115,14 +116,21 @@ bool Settings::load() {
   }
   values.jkDePin = -1;
   values.pylonDePin = -1;
-  if (values.version < 2) {
+  const uint16_t storedVersion = values.version;
+  if (storedVersion < 2) {
     fillDefaultNames();
     values.debugJk = false;
     values.debugAnenji = false;
     values.debugPylon = false;
   }
-  if (values.version < 3) {
+  if (storedVersion < 3) {
     migrateLoadsFromRelays();
+  }
+  if (storedVersion < 4) {
+    strncpy(values.jkBmsMac, EMS_JK_BMS_MAC, sizeof(values.jkBmsMac) - 1);
+    values.jkBmsMac[sizeof(values.jkBmsMac) - 1] = '\0';
+  }
+  if (storedVersion < kVersion) {
     values.version = kVersion;
     save();
   }
@@ -139,8 +147,8 @@ bool Settings::save() {
 }
 
 bool Settings::commPinsDiffer(const AppSettings& other) const {
-  return values.jkRxPin != other.jkRxPin || values.jkTxPin != other.jkTxPin ||
-         values.anenjiRxPin != other.anenjiRxPin || values.anenjiTxPin != other.anenjiTxPin ||
+  return strcmp(values.jkBmsMac, other.jkBmsMac) != 0 || values.anenjiRxPin != other.anenjiRxPin ||
+         values.anenjiTxPin != other.anenjiTxPin ||
          values.pylonRxPin != other.pylonRxPin || values.pylonTxPin != other.pylonTxPin;
 }
 
@@ -194,8 +202,6 @@ String Settings::pinConflict() const {
   add(values.statusPins[1], "wejscie 2");
   add(values.statusPins[2], "wejscie 3");
   add(values.statusPins[3], "wejscie 4");
-  add(values.jkRxPin, "JK RX");
-  add(values.jkTxPin, "JK TX");
   add(values.anenjiRxPin, "falownik RX");
   add(values.anenjiTxPin, "falownik TX");
   add(values.pylonRxPin, "Pylon RX");

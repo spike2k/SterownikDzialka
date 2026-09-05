@@ -1,11 +1,12 @@
 # Sterownik Działka — ESP32 EMS
 
-Modularne serce systemu zarządzania energią dla działki. Projekt używa PlatformIO i frameworka Arduino. Domyślnie kompiluje się w trybie symulacji, więc do uruchomienia panelu nie są potrzebne JK BMS ani falownik ANENJI.
+Modularne serce systemu zarządzania energią dla działki. Projekt używa PlatformIO i frameworka Arduino. Domyślnie pracuje z prawdziwym sprzętem (`EMS_SIMULATION=0`).
 
 ## Funkcje pierwszej wersji
 
-- dane JK BMS: SOC, napięcie, prąd i napięcia cel (parser do uzupełnienia; bez atrap),
-- telemetria ANENJI: PV i obciążenie (parser do uzupełnienia; bez atrap),
+- JK-BMS przez BLE: automatyczny skan/reconnect, parser JK02 24S/32S i diagnostyczne rozpoznanie JK04,
+- wspólny `BatteryData`: SOC, signed napięcie/prąd/moc, temperatury, do 32 cel, MOS-y, balansowanie i alarmy,
+- telemetria ANENJI przez MAX3232/RS232: potwierdzony Modbus RTU 9600 8N1, tylko odczyty FC03,
 - osobna warstwa RS485 pod późniejszą emulację Pylontech,
 - konfiguracja Wi-Fi z panelu WWW, zapis w NVS; awaryjny AP `SterownikDzialka-Setup`,
 - MQTT przez TLS: publikacja telemetrii, Last Will oraz sterowanie lokalnymi i zdalnymi odbiornikami,
@@ -20,8 +21,8 @@ Modularne serce systemu zarządzania energią dla działki. Projekt używa Platf
 | Element | Ilość | Uwagi |
 |---|---:|---|
 | ESP32 DevKit | 1 | główny sterownik |
-| Izolowany RS485 ↔ TTL 3,3 V | 1 | JK BMS; auto kierunek (TX/RX), pełna izolacja zalecana |
-| RS485 ↔ TTL 3,3 V | 1 | osobny konwerter pod Pylontech, auto kierunek |
+| BLE w ESP32 | 1 | odczyt JK-BMS BD6A24S12P, bez dodatkowego konwertera |
+| Izolowany RS485 ↔ TTL 3,3 V / CAN | 1 | przyszły emulator Pylontech; obecnie bez transmisji |
 | MAX3232 3,3 V | 1 | RS232 do ANENJI |
 | Moduł przekaźników 4× | 1 | wejścia zgodne z 3,3 V; optoizolacja zalecana |
 | Zasilacz 230 V → 5 V, 2–3 A | 1 | izolowane zasilanie centralki |
@@ -36,12 +37,12 @@ Przekaźniki PCB nie powinny bezpośrednio przełączać dużych obciążeń 230
 | Funkcja | GPIO ESP32 | Uwagi |
 |---|---:|---|
 | Przekaźniki / odbiorniki 1–4 | 16, 17, 18, 19 | sterowanie lokalne, konfigurowalne z panelu |
-| JK RS485 RX/TX | 27, 26 | odczyt BMS, konwerter auto-kierunek |
+| JK-BMS | BLE | automatyczne wyszukanie albo opcjonalny MAC w panelu |
 | ANENJI RS232 RX/TX | 33, 32 | MAX3232 do falownika |
 | Pylontech RS485 RX/TX | 22, 23 | emulacja / komunikacja, auto-kierunek |
 | Wejścia stanu 1–4 | wyłączone (−1) | odczyt stanów; np. 4, 13, 14, 15 z pull-up |
 
-Piny można zmienić w panelu WWW (koło zębate). Zmiana UART wymaga restartu ESP. GPIO 6–11 zajmuje flash, 34–39 są tylko wejściami. Moduł przekaźników jest domyślnie aktywny stanem niskim.
+Piny UART można zmienić w panelu WWW (koło zębate). Zmiana komunikacji wymaga restartu ESP. GPIO 6–11 zajmuje flash, 34–39 są tylko wejściami. Moduł przekaźników jest domyślnie aktywny stanem niskim.
 
 Kanał odbiornika jest aktywny, gdy ma GPIO ≥ 0 albo wypełniony identyfikator MQTT (np. `fontanna`). Oba puste = slot wyłączony. W Auto nadwyżka `pvW − loadW + moc lokalnych ON − rezerwa` jest rozdzielana od priorytetu 1 w dół; kanał z mocą 0 W jest pomijany. Histereza i minimalny czas przełączenia ograniczają cykanie styków. Satelita MQTT nasłuchuje `ems/sterownik-dzialka/load/{id}/set` oraz `ems/sterownik-dzialka/status` i gaśnie przy `offline`.
 
@@ -66,7 +67,19 @@ python -m platformio run -t upload
 python -m platformio device monitor
 ```
 
-Polecenie `upload` uruchamiaj dopiero po podłączeniu właściwego ESP32 i sprawdzeniu pinów. Domyślnie `EMS_SIMULATION=0` — panel pokazuje błędy połączeń (BMS, falownik, Pylontech), a nie sztuczne wartości. Parsery protokołów są w `src/drivers`.
+Polecenie `upload` uruchamiaj dopiero po podłączeniu właściwego ESP32 i sprawdzeniu pinów. Domyślnie `EMS_SIMULATION=0` — panel pokazuje błędy połączeń (BMS, falownik, Pylontech), a nie sztuczne wartości. Główne środowisko używa `min_spiffs.csv`, ponieważ firmware BLE + TLS + WWW nie mieści się w domyślnej partycji aplikacji 1,25 MB.
+
+### Jednorazowy test JK-BMS BLE
+
+Szczegóły protokołu, hipotezy i procedura terenowa są w [`JK_BMS_PROTOCOL.md`](JK_BMS_PROTOCOL.md). Tester skanuje BLE, wypisuje name/MAC/RSSI, automatycznie łączy urządzenie wyglądające na JK, pokazuje services, characteristics, każde notify HEX i czytelne `BatteryData`.
+
+```powershell
+C:\Users\rozma\.platformio\penv\Scripts\platformio.exe run -e jk_ble_probe
+C:\Users\rozma\.platformio\penv\Scripts\platformio.exe run -e jk_ble_probe -t upload
+C:\Users\rozma\.platformio\penv\Scripts\platformio.exe device monitor -b 115200
+```
+
+Komendy monitora: `show`, `p auto`, `p 24`, `p 32`, `p 04`. Najpierw testuj AUTO. Jeśli kilka urządzeń pasuje, wpisz MAC BMS w `EMS_JK_BMS_MAC` w lokalnym `secrets.h` albo później w panelu głównego firmware.
 
 ### Jednorazowy test protokołu ANENJI
 
@@ -120,9 +133,18 @@ Interfejs JSON i wyraźnie oddzielone moduły pozwalają później dołożyć ch
 
 ```text
 include/             konfiguracja i lokalne sekrety
-src/core/            model danych i logika przekaźników
-src/drivers/         JK BMS, ANENJI, Pylontech
+src/core/            BatteryData, telemetria, ustawienia i logika przekaźników
+src/drivers/         JK-BMS BLE/protokół, ANENJI RS232, szkielet emulatora baterii
 src/services/        Wi-Fi, MQTT, zdalne HTTP
 src/web/             lokalny panel i REST API
 src/main.cpp         składanie modułów i główna pętla
+```
+
+Docelowy przepływ danych:
+
+```text
+JK-BMS --BLE--> ESP32 --MAX3232/RS232--> ANENJI (monitoring FC03)
+                    |\
+                    | +--izolowany RS485/CAN--> przyszła emulacja Pylontech (bez TX obecnie)
+                    +----WiFi-------------> WWW / MQTT
 ```

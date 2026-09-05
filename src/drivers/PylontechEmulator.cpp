@@ -17,8 +17,8 @@ void PylontechEmulator::begin(const Settings& settings) {
   attachInterruptArg(rxPin_, onRxEdge, this, FALLING);
 }
 
-void PylontechEmulator::tick(const Telemetry& telemetry) {
-  (void)telemetry;
+void PylontechEmulator::tick(const BatteryData& battery) {
+  (void)battery;
   (void)settings_;
 }
 

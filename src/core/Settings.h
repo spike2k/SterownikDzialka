@@ -46,6 +46,7 @@ struct AppSettings {
   uint16_t surplusReserveW = Config::defaultSurplusReserveW;
   uint16_t loadHysteresisW = Config::defaultLoadHysteresisW;
   uint16_t loadMinToggleMs = Config::defaultLoadMinToggleMs;
+  char jkBmsMac[18] = EMS_JK_BMS_MAC;  // appended for binary NVS compatibility (v4)
 };
 
 class Settings {

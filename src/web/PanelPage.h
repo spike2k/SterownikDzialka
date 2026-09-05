@@ -222,17 +222,16 @@ input,select{background:#0b1420;border:1px solid var(--line);border-radius:10px;
         <label>GPIO 4<input id="status3" name="status3" type="number" min="-1" max="39"></label>
         <label>Logika<select id="statusActiveLow" name="statusActiveLow"><option value="1">aktywny stan niski</option><option value="0">aktywny stan wysoki</option></select></label>
       </div>
-      <h2>GPIO komunikacji</h2>
+      <h2>Komunikacja z baterią i falownikiem</h2>
       <div class="g">
-        <label>JK RX<input id="jkRx" name="jkRx" type="number" min="-1" max="39"></label>
-        <label>JK TX<input id="jkTx" name="jkTx" type="number" min="-1" max="39"></label>
+        <label>MAC JK-BMS (opcjonalny)<input id="jkBmsMac" name="jkBmsMac" maxlength="17" placeholder="auto lub aa:bb:cc:dd:ee:ff"></label>
         <label>Falownik RX<input id="anenjiRx" name="anenjiRx" type="number" min="-1" max="39"></label>
         <label>Falownik TX<input id="anenjiTx" name="anenjiTx" type="number" min="-1" max="39"></label>
         <label>Pylon RX<input id="pylonRx" name="pylonRx" type="number" min="-1" max="39"></label>
         <label>Pylon TX<input id="pylonTx" name="pylonTx" type="number" min="-1" max="39"></label>
       </div>
-      <h2>Debug RS (konsola USB)</h2>
-      <p class="help">ESP podłączone przez USB, monitor 115200. Widać hex ramek JK/falownika i aktywność RX Pylon. Komendy: <b>debug jk</b>, <b>debug inv</b>, <b>debug pylon</b>, <b>debug off</b>, <b>help</b>.</p>
+      <h2>Debug komunikacji (konsola USB)</h2>
+      <p class="help">ESP podłączone przez USB, monitor 115200. JK pokazuje skan BLE, services i notify HEX; falownik ramki RS232. Komendy: <b>debug jk</b>, <b>debug inv</b>, <b>debug pylon</b>, <b>debug off</b>, <b>help</b>.</p>
       <div class="g">
         <label>JK BMS<input id="debugJk" type="checkbox"></label>
         <label>Falownik<input id="debugAnenji" type="checkbox"></label>
@@ -280,7 +279,7 @@ function fillDefaults(){if(!defaults)return;ensureLoadRows();
 (defaults.loadPins||[]).forEach((v,i)=>fill('loadPin'+i,v));
 for(let i=0;i<10;i++){fill('loadPrio'+i,i+1);fill('loadPower'+i,0);fill('loadMqtt'+i,'')}
 ['status0','status1','status2','status3'].forEach((id,i)=>fill(id,defaults.statusPins[i]));
-fill('jkRx',defaults.jkRx);fill('jkTx',defaults.jkTx);
+fill('jkBmsMac',defaults.jkBmsMac||'');
 fill('anenjiRx',defaults.anenjiRx);fill('anenjiTx',defaults.anenjiTx);
 fill('pylonRx',defaults.pylonRx);fill('pylonTx',defaults.pylonTx);
 fill('relayActiveLow',defaults.relayActiveLow?1:0);fill('statusActiveLow',defaults.statusActiveLow?1:0);
@@ -295,7 +294,7 @@ async function loadCfg(){
   (s.statusNames||[]).forEach((v,i)=>fill('statusName'+i,v));
   q('debugJk').checked=!!s.debugJk;q('debugAnenji').checked=!!s.debugAnenji;q('debugPylon').checked=!!s.debugPylon;
   fill('relayActiveLow',s.relayActiveLow?1:0);fill('statusActiveLow',s.statusActiveLow?1:0);
-  fill('jkRx',s.jkRx);fill('jkTx',s.jkTx);fill('anenjiRx',s.anenjiRx);fill('anenjiTx',s.anenjiTx);
+  fill('jkBmsMac',s.jkBmsMac||'');fill('anenjiRx',s.anenjiRx);fill('anenjiTx',s.anenjiTx);
   fill('pylonRx',s.pylonRx);fill('pylonTx',s.pylonTx);fill('cellDriftAlarmMv',s.cellDriftAlarmMv);
   fill('surplusReserveW',s.surplusReserveW);fill('loadHysteresisW',s.loadHysteresisW);fill('loadMinToggleMs',s.loadMinToggleMs);
 }

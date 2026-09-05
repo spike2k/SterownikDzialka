@@ -1,12 +1,12 @@
 #pragma once
 
 #include "core/Settings.h"
-#include "core/Telemetry.h"
+#include "drivers/BatteryEmulator.h"
 
-class PylontechEmulator {
+class PylontechEmulator : public BatteryEmulator {
  public:
   void begin(const Settings& settings);
-  void tick(const Telemetry& telemetry);
+  void tick(const BatteryData& battery) override;
   uint32_t takeRxEdges();
 
  private:

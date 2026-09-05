@@ -27,6 +27,9 @@
 #ifndef EMS_SIMULATION
 #define EMS_SIMULATION 0
 #endif
+#ifndef EMS_JK_BMS_MAC
+#define EMS_JK_BMS_MAC ""
+#endif
 
 namespace Config {
 constexpr char deviceName[] = "sterownik-dzialka";
@@ -75,4 +78,5 @@ constexpr uint32_t jkBaud = 115200;
 constexpr uint32_t anenjiBaud = 9600;  // potwierdzone podsłuchem dongla, slave 1 FC03
 constexpr uint32_t pylonBaud = 115200;
 constexpr uint32_t busDebugIdleMs = 5000;
+constexpr uint32_t jkDataTimeoutMs = 15000;
 }

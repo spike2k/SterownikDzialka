@@ -1,6 +1,7 @@
 #include "web/WebPanel.h"
 
 #include <Arduino.h>
+#include <cctype>
 #include <cstring>
 #include "AppConfig.h"
 #include "core/Settings.h"
@@ -80,6 +81,19 @@ void normalizeMqttKey(char* key) {
     if (*cursor >= 'A' && *cursor <= 'Z') *cursor = static_cast<char>(*cursor - 'A' + 'a');
   }
 }
+
+bool validMac(const char* value) {
+  if (!value || value[0] == '\0') return true;
+  if (strlen(value) != 17) return false;
+  for (size_t i = 0; i < 17; ++i) {
+    if ((i + 1) % 3 == 0) {
+      if (value[i] != ':') return false;
+    } else if (!isxdigit(static_cast<unsigned char>(value[i]))) {
+      return false;
+    }
+  }
+  return true;
+}
 }
 
 void WebPanel::begin(Telemetry& telemetry, RelayController& relays, NetworkService& network, Settings& settings,
@@ -139,6 +153,13 @@ bool WebPanel::readPostedSettings(AppSettings& target, String& error) {
     copyZ(target.mqttPassword, sizeof(target.mqttPassword), server_.arg("mqttPassword"));
   }
   copyZ(target.mqttUser, sizeof(target.mqttUser), server_.arg("mqttUser"));
+  if (server_.hasArg("jkBmsMac")) copyZ(target.jkBmsMac, sizeof(target.jkBmsMac), server_.arg("jkBmsMac"));
+  target.jkBmsMac[sizeof(target.jkBmsMac) - 1] = '\0';
+  for (char* c = target.jkBmsMac; *c; ++c) *c = static_cast<char>(tolower(static_cast<unsigned char>(*c)));
+  if (!validMac(target.jkBmsMac)) {
+    error = "MAC JK-BMS musi miec format aa:bb:cc:dd:ee:ff albo byc pusty";
+    return false;
+  }
   int port = server_.hasArg("mqttPort") ? server_.arg("mqttPort").toInt() : target.mqttPort;
   if (port < 1 || port > 65535) port = 1883;
   target.mqttPort = static_cast<uint16_t>(port);
@@ -187,8 +208,6 @@ bool WebPanel::readPostedSettings(AppSettings& target, String& error) {
       snprintf(target.statusNames[index], Config::labelBytes, "Wejscie %u", static_cast<unsigned>(index + 1));
     }
   }
-  target.jkRxPin = pinArg(server_, "jkRx", target.jkRxPin);
-  target.jkTxPin = pinArg(server_, "jkTx", target.jkTxPin);
   target.jkDePin = -1;
   target.anenjiRxPin = pinArg(server_, "anenjiRx", target.anenjiRxPin);
   target.anenjiTxPin = pinArg(server_, "anenjiTx", target.anenjiTxPin);
@@ -224,7 +243,6 @@ bool WebPanel::readPostedSettings(AppSettings& target, String& error) {
   for (size_t index = 0; index < Config::statusCount; ++index) {
     if (badIn(target.statusPins[index], "wejscie stanu")) return false;
   }
-  if (badIn(target.jkRxPin, "JK RX") || badOut(target.jkTxPin, "JK TX")) return false;
   if (badIn(target.anenjiRxPin, "falownik RX") || badOut(target.anenjiTxPin, "falownik TX")) return false;
   if (badIn(target.pylonRxPin, "Pylon RX") || badOut(target.pylonTxPin, "Pylon TX")) return false;
   return true;
@@ -297,8 +315,7 @@ String WebPanel::settingsJson() const {
   json += ",\"debugJk\":" + String(cfg.debugJk ? "true" : "false");
   json += ",\"debugAnenji\":" + String(cfg.debugAnenji ? "true" : "false");
   json += ",\"debugPylon\":" + String(cfg.debugPylon ? "true" : "false");
-  json += ",\"jkRx\":" + String(cfg.jkRxPin);
-  json += ",\"jkTx\":" + String(cfg.jkTxPin);
+  json += ",\"jkBmsMac\":" + jsonEscape(cfg.jkBmsMac);
   json += ",\"anenjiRx\":" + String(cfg.anenjiRxPin);
   json += ",\"anenjiTx\":" + String(cfg.anenjiTxPin);
   json += ",\"pylonRx\":" + String(cfg.pylonRxPin);
@@ -308,7 +325,7 @@ String WebPanel::settingsJson() const {
   json += "\"loadPins\":[16,17,18,19,-1,-1,-1,-1,-1,-1],\"statusPins\":[-1,-1,-1,-1]";
   json += ",\"surplusReserveW\":100,\"loadHysteresisW\":80,\"loadMinToggleMs\":20000";
   json += ",\"relayActiveLow\":true,\"statusActiveLow\":true";
-  json += ",\"jkRx\":27,\"jkTx\":26,\"anenjiRx\":33,\"anenjiTx\":32";
+  json += ",\"jkBmsMac\":\"\",\"anenjiRx\":33,\"anenjiTx\":32";
   json += ",\"pylonRx\":22,\"pylonTx\":23,\"cellDriftAlarmMv\":50}";
   json += "}";
   return json;

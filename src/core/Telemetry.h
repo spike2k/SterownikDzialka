@@ -2,8 +2,9 @@
 
 #include <Arduino.h>
 #include <array>
+#include "core/BatteryData.h"
 
-constexpr size_t MaxCells = 16;
+constexpr size_t MaxCells = BatteryMaxCells;
 
 struct Telemetry {
   float pvPowerW = 0;
@@ -18,4 +19,3 @@ struct Telemetry {
   bool pylonOnline = false;
   uint32_t updatedAtMs = 0;
 };
-
