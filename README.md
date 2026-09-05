@@ -21,7 +21,7 @@ Modularne serce systemu zarządzania energią dla działki. Projekt używa Platf
 | Element | Ilość | Uwagi |
 |---|---:|---|
 | ESP32 DevKit | 1 | główny sterownik |
-| BLE w ESP32 | 1 | odczyt JK-BMS BD6A24S12P, bez dodatkowego konwertera |
+| BLE w ESP32 | 1 | odczyt JK-BMS JK_B2A20S20P, bez dodatkowego konwertera |
 | Izolowany RS485 ↔ TTL 3,3 V / CAN | 1 | przyszły emulator Pylontech; obecnie bez transmisji |
 | MAX3232 3,3 V | 1 | RS232 do ANENJI |
 | Moduł przekaźników 4× | 1 | wejścia zgodne z 3,3 V; optoizolacja zalecana |

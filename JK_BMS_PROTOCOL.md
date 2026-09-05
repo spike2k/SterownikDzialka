@@ -1,15 +1,15 @@
-# JK-BMS BD6A24S12P — BLE, ramki i test terenowy
+# JK-BMS JK_B2A20S20P — BLE, ramki i test terenowy
 
 Stan implementacji: 2026-09-05. Kod: `src/drivers/JkBmsBleDriver.*`, `JkBmsProtocol.*`; tester: środowisko PlatformIO `jk_ble_probe`.
 
 ## Zakres i źródła
 
-- Docelowy BMS: **JK BD6A24S12P**.
+- BMS w terenie: **JK_B2A20S20P**, HW **11U**, SW **11.54**, BLE name `407272D0245`, MAC `c8:47:80:20:bf:82`.
 - Transport: **Bluetooth Low Energy (BLE)**, klientem jest ESP32.
 - Implementacja jest lekka i natywna dla Arduino-ESP32; nie zawiera ESPHome.
 - Podstawą mapy jest projekt [`syssi/esphome-jk-bms`](https://github.com/syssi/esphome-jk-bms), w szczególności jego [dokumentacja BLE](https://github.com/syssi/esphome-jk-bms/blob/main/docs/protocol-design-ble.md) i [decoder `jk_bms_ble.cpp`](https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_bms_ble/jk_bms_ble.cpp).
 
-Projekt źródłowy wymienia egzemplarze BD6A24S12P HW 11.XW / SW 11.36 i 11.42 jako działające po BLE z `JK02_32S`. **HIPOTEZA:** nasz egzemplarz używa tego samego wariantu. Potwierdzeniem będzie dopiero poprawna ramka z rzeczywistego BMS i spójność napięcia pakietu z sumą cel.
+HW 11.x w ESPHome mapuje się na `JK02_32S`. Po `0x97` ten egzemplarz oddaje ramkę `0x03` (w ramce hasła device `1234` i setup `123456`). Potwierdzeniem ogniw będzie ramka `0x02` po pojedynczym `0x96` bez ponawiania `0x97`.
 
 ## BLE
 
@@ -20,18 +20,22 @@ Główny profil znany ze źródeł:
 | Service | `0xFFE0` | usługa JK-BMS |
 | Characteristic | `0xFFE1` | zapis poleceń i notify |
 
-W nowszym module BLE źródła pokazują dwie charakterystyki o tym samym UUID: uchwyt `0x0003` ma zapis, a `0x0005` notify (CCCD `0x0006`). Driver nie polega na numerach uchwytów: wybiera `FFE1` po właściwościach write oraz notify/indicate. W starszym module spotykane są również `FFE2` oraz dodatkowa usługa `F000FFC0-0451-4000-B000-000000000000`; jest to informacja diagnostyczna, a nie potwierdzony profil naszego urządzenia.
+W nowszym module BLE źródła pokazują dwie charakterystyki o tym samym UUID: uchwyt `0x0003` ma zapis, a `0x0005` notify (CCCD `0x0006`). Na egzemplarzu terenowym (`name=407272D0245`, MAC `c8:47:80:…`) profil jest inny: jedna `FFE1` ma jednocześnie write + write-without-response + notify (`handle=0x0012`), a `FFE2` jest tylko write-without-response (`handle=0x0010`). Jest też usługa TI OAD `F000FFC0-0451-4000-B000-000000000000`. Driver nie polega na numerach uchwytów: bierze `FFE1` do notify i zapisu, a gdy zapis jest tylko na `FFE2`, używa jej jako TX.
 
-Wyszukiwanie działa po skonfigurowanym MAC albo automatycznie po nazwie zawierającej `JK`, `JIKONG` lub `BMS`, reklamowanej usłudze FFE0 oraz znanych prefiksach `20:21:11` / `C8:47:8C`. MAC można wpisać w panelu WWW. Dla probe można ustawić `EMS_JK_BMS_MAC` w lokalnym `secrets.h`; pusty oznacza AUTO.
+Hasło `123456` w aplikacji JK to kod ustawień BMS, nie PIN parowania BLE. Odczyt statusu nie wymaga logowania GATT.
+
+Wyszukiwanie działa po skonfigurowanym MAC albo automatycznie po nazwie zawierającej `JK`, `JIKONG` lub `BMS`, reklamowanej usłudze FFE0 oraz znanych prefiksach `20:21:11` / `C8:47:8C` / `C8:47:80`. MAC można wpisać w panelu WWW. Dla probe można ustawić `EMS_JK_BMS_MAC` w lokalnym `secrets.h`; pusty oznacza AUTO.
 
 ## Polecenia odczytu
 
-Po subskrypcji notify driver wysyła do **BMS** dwie 20-bajtowe komendy:
+Po subskrypcji notify driver wysyła:
 
-- `0x97` — żądanie informacji o urządzeniu (odpowiedź typu `0x03`),
-- `0x96` — żądanie ustawień/uruchomienie strumienia statusu (odpowiedzi `0x01`, potem okresowe `0x02`).
+1. raz `0x97` — informacje o urządzeniu (ramka `0x03`, 300 B),
+2. potem tylko `0x96` aż pojawi się strumień cel.
 
-Format TX: nagłówek `AA 55 90 EB`, kod w bajcie 4, długość w bajcie 5, dane 6–15, licznik 16, rezerwa 17–18, suma modulo 256 w bajcie 19. Implementacja nie zawiera poleceń zmiany parametrów, MOS ani konfiguracji BMS. Nie dodano też żadnej transmisji Pylontech do falownika. Driver ANENJI nadal wykonuje wyłącznie istniejące odczyty FC03 — bez FC06/FC10.
+`0x96` na tym module jest potwierdzane krótką ramką `AA 55 90 EB C8 01 01 …` (`C8 01 01` = OK, `C8 01 00` = odrzut), a nie od razu ramką `0x01`. Ponawianie `0x97` razem z `0x96` przerywa start strumienia `0x02`.
+
+Format TX jak w ESPHome: nagłówek `AA 55 90 EB`, kod w bajcie 4, długość 0, reszta zer, suma modulo 256 w bajcie 19. Implementacja nie zawiera poleceń zmiany parametrów, MOS ani konfiguracji BMS. Nie dodano też żadnej transmisji Pylontech do falownika. Driver ANENJI nadal wykonuje wyłącznie istniejące odczyty FC03 — bez FC06/FC10.
 
 ## Odpowiedzi i składanie ramek
 
@@ -54,7 +58,7 @@ Tryb AUTO ocenia trzy formaty:
 
 Dla JK02 kandydat musi mieć fizycznie sensowne napięcia, SOC i prąd, a napięcie pakietu ma zgadzać się z sumą aktywnych cel. Przy remisie parser zwraca `UNKNOWN`, zamiast zgadywać. Probe pozwala wtedy wpisać `p 24`, `p 32`, `p 04` albo wrócić przez `p auto`.
 
-**HIPOTEZA:** autodetekcja wybierze `JK02_32S` dla BD6A24S12P. Obsługa JK04 w tym etapie służy głównie rozpoznaniu formatu i napięć cel; pełne mapowanie pozostałych pól JK04 nie jest potwierdzone dla docelowego BMS.
+**HIPOTEZA:** autodetekcja wybierze `JK02_32S` dla HW 11.x (`JK_B2A20S20P`). Obsługa JK04 w tym etapie służy głównie rozpoznaniu formatu i napięć cel.
 
 ## Mapa dekodowanych pól JK02
 

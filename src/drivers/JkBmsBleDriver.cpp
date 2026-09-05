@@ -16,12 +16,25 @@
 
 namespace {
 constexpr uint16_t kServiceUuid = 0xFFE0;
-constexpr uint16_t kCharacteristicUuid = 0xFFE1;
+constexpr uint16_t kNotifyUuid = 0xFFE1;
+constexpr uint16_t kWriteFallbackUuid = 0xFFE2;
 constexpr uint32_t kScanSeconds = 8;
 constexpr uint32_t kRetryMs = 5000;
 constexpr uint32_t kDataTimeoutMs = 15000;
-constexpr uint32_t kRequestRetryMs = 4000;
+constexpr uint32_t kDeviceInfoRetryMs = 1500;
+constexpr uint32_t kCellInfoRetryMs = 2500;
 constexpr uint32_t kLogIntervalMs = 15000;
+
+bool uuidEquals16(BLEUUID uuid, uint16_t shortUuid) {
+  BLEUUID wanted(shortUuid);
+  if (uuid.equals(wanted)) return true;
+  return uuid.toString() == wanted.toString();
+}
+
+bool isKnownJkMacPrefix(const std::string& address) {
+  return address.rfind("20:21:11:", 0) == 0 || address.rfind("c8:47:8c:", 0) == 0 ||
+         address.rfind("c8:47:80:", 0) == 0;
+}
 
 void printHex(const char* prefix, const uint8_t* data, size_t length) {
   Serial.printf("%s [%u B] ", prefix, static_cast<unsigned>(length));
@@ -70,16 +83,16 @@ class JkBmsBleDriver::Impl : public BLEAdvertisedDeviceCallbacks, public BLEClie
   void tick(BatteryData& output) {
     if (!started_) return;
     const uint32_t now = millis();
-    if (connected_ && lastValidFrameMs_ && now - lastValidFrameMs_ > kDataTimeoutMs) {
+    if (connected_ && lastNotifyMs_ && now - lastNotifyMs_ > kDataTimeoutMs) {
       connected_ = false;
       if (client_ && client_->isConnected()) client_->disconnect();
       Serial.println("JK BLE: timeout danych, ponowne laczenie");
     }
-    if (connected_ && now - lastRequestMs_ >= kRequestRetryMs &&
-        (!lastValidFrameMs_ || now - lastValidFrameMs_ >= kRequestRetryMs)) {
-      sendReadRequests();
+    if (connected_) pollCommands(now);
+    if (!connected_ && !scanning_ && !connecting_ && !connectRequested_ && autoConnect_ &&
+        now - lastAttemptMs_ >= kRetryMs) {
+      startScan();
     }
-    if (!connected_ && !scanning_ && !connecting_ && autoConnect_ && now - lastAttemptMs_ >= kRetryMs) startScan();
     if (connectRequested_ && !connecting_) {
       connectRequested_ = false;
       connecting_ = true;
@@ -114,8 +127,7 @@ class JkBmsBleDriver::Impl : public BLEAdvertisedDeviceCallbacks, public BLEClie
     const std::string address = device.getAddress().toString();
     const std::string name = device.haveName() ? device.getName() : std::string();
     const bool ffe0 = device.haveServiceUUID() && device.isAdvertisingService(BLEUUID(kServiceUuid));
-    const bool knownPrefix = address.rfind("20:21:11:", 0) == 0 || address.rfind("c8:47:8c:", 0) == 0;
-    const bool jk = JkBmsBleDriver::looksLikeJk(name.c_str(), ffe0) || knownPrefix;
+    const bool jk = JkBmsBleDriver::looksLikeJk(name.c_str(), ffe0) || isKnownJkMacPrefix(address);
     Serial.printf("BLE  name=%s  MAC=%s  RSSI=%d%s\n", name.empty() ? "(brak)" : name.c_str(),
                   address.c_str(), device.getRSSI(), jk ? "  [JK-BMS?]" : "");
     const bool selected = targetMac_[0] ? strcasecmp(targetMac_, address.c_str()) == 0 : jk;
@@ -123,7 +135,11 @@ class JkBmsBleDriver::Impl : public BLEAdvertisedDeviceCallbacks, public BLEClie
     std::snprintf(candidateMac_, sizeof(candidateMac_), "%s", address.c_str());
     candidateAddressType_ = device.getAddressType();
     connectRequested_ = true;
-    if (scan_) scan_->stop();
+    scanning_ = false;
+    if (scan_) {
+      scan_->stop();
+      scan_->clearResults();
+    }
   }
 
   void onConnect(BLEClient*) override {}
@@ -131,6 +147,7 @@ class JkBmsBleDriver::Impl : public BLEAdvertisedDeviceCallbacks, public BLEClie
   void onDisconnect(BLEClient*) override {
     connected_ = false;
     connecting_ = false;
+    scanning_ = false;
     writeCharacteristic_ = nullptr;
     notifyCharacteristic_ = nullptr;
     lastAttemptMs_ = millis();
@@ -158,44 +175,66 @@ class JkBmsBleDriver::Impl : public BLEAdvertisedDeviceCallbacks, public BLEClie
     if (!scan_->start(kScanSeconds, scanCompleteThunk, false)) scanning_ = false;
   }
 
+  void abortConnect(const char* reason) {
+    Serial.println(reason);
+    writeCharacteristic_ = nullptr;
+    notifyCharacteristic_ = nullptr;
+    connected_ = false;
+    connecting_ = false;
+    scanning_ = false;
+    lastAttemptMs_ = millis();
+    if (client_ && client_->isConnected()) client_->disconnect();
+  }
+
   void connectTask() {
     lastAttemptMs_ = millis();
+    writeCharacteristic_ = nullptr;
+    notifyCharacteristic_ = nullptr;
     Serial.printf("JK BLE: laczenie z %s...\n", candidateMac_);
     if (!client_) {
       client_ = BLEDevice::createClient();
       client_->setClientCallbacks(this);
     }
     if (!client_->connect(BLEAddress(candidateMac_), candidateAddressType_)) {
-      Serial.println("JK BLE: polaczenie nieudane");
-      connecting_ = false;
+      abortConnect("JK BLE: polaczenie nieudane");
       return;
     }
     client_->setMTU(517);
+    delay(200);
+    // getServices() w dumpie niszczy wczesniej pobrane BLERemoteService — zrzut przed getService(FFE0).
+    if (verbose_ && !dumpedServices_) {
+      dumpServices();
+      dumpedServices_ = true;
+    }
     BLERemoteService* service = client_->getService(BLEUUID(kServiceUuid));
-    if (verbose_) dumpServices();
     if (!service) {
-      Serial.println("JK BLE: brak service FFE0");
-      client_->disconnect();
-      connecting_ = false;
+      abortConnect("JK BLE: brak service FFE0");
       return;
     }
     auto* chars = service->getCharacteristicsByHandle();
-    for (const auto& entry : *chars) {
-      BLERemoteCharacteristic* characteristic = entry.second;
-      if (!characteristic->getUUID().equals(BLEUUID(kCharacteristicUuid))) continue;
-      if (!writeCharacteristic_ && (characteristic->canWriteNoResponse() || characteristic->canWrite())) {
-        writeCharacteristic_ = characteristic;
-      }
-      if (!notifyCharacteristic_ && (characteristic->canNotify() || characteristic->canIndicate())) {
-        notifyCharacteristic_ = characteristic;
-      }
-    }
-    if (!writeCharacteristic_ || !notifyCharacteristic_) {
-      Serial.println("JK BLE: nie znaleziono pary FFE1 write/notify");
-      client_->disconnect();
-      connecting_ = false;
+    if (!chars || chars->empty()) {
+      abortConnect("JK BLE: service FFE0 bez charakterystyk");
       return;
     }
+    BLERemoteCharacteristic* ffe2Write = nullptr;
+    for (const auto& entry : *chars) {
+      BLERemoteCharacteristic* characteristic = entry.second;
+      const bool canWrite = characteristic->canWriteNoResponse() || characteristic->canWrite();
+      const bool canNotify = characteristic->canNotify() || characteristic->canIndicate();
+      if (uuidEquals16(characteristic->getUUID(), kNotifyUuid)) {
+        if (!writeCharacteristic_ && canWrite) writeCharacteristic_ = characteristic;
+        if (!notifyCharacteristic_ && canNotify) notifyCharacteristic_ = characteristic;
+      } else if (uuidEquals16(characteristic->getUUID(), kWriteFallbackUuid) && canWrite) {
+        ffe2Write = characteristic;
+      }
+    }
+    if (!writeCharacteristic_ && ffe2Write) writeCharacteristic_ = ffe2Write;
+    if (!writeCharacteristic_ || !notifyCharacteristic_) {
+      abortConnect("JK BLE: nie znaleziono zapisu/notify w FFE0 (FFE1/FFE2)");
+      return;
+    }
+    Serial.printf("JK BLE: write handle=0x%04X notify handle=0x%04X\n", writeCharacteristic_->getHandle(),
+                  notifyCharacteristic_->getHandle());
     notifyCharacteristic_->registerForNotify(
         [this](BLERemoteCharacteristic*, uint8_t* data, size_t length, bool) { onNotify(data, length); });
     std::snprintf(connectedMac_, sizeof(connectedMac_), "%s", candidateMac_);
@@ -208,9 +247,13 @@ class JkBmsBleDriver::Impl : public BLEAdvertisedDeviceCallbacks, public BLEClie
     assemblerLength_ = 0;
     headerMatch_ = 0;
     lastValidFrameMs_ = 0;
+    lastNotifyMs_ = 0;
+    lastRequestMs_ = 0;
+    gotDeviceInfo_ = false;
+    gotCellStream_ = false;
     Serial.println("JK-BMS CONNECTED");
     Serial.printf("MAC: %s\n", connectedMac_);
-    sendReadRequests();
+    sendCommand(0x97);
   }
 
   void dumpServices() {
@@ -229,21 +272,35 @@ class JkBmsBleDriver::Impl : public BLEAdvertisedDeviceCallbacks, public BLEClie
     }
   }
 
-  void sendReadRequests() {
+  void sendCommand(uint8_t command) {
     if (!connected_ || !writeCharacteristic_) return;
-    const auto deviceInfo = JkBmsProtocol::buildReadCommand(0x97, sequence_++);
-    const auto cellInfo = JkBmsProtocol::buildReadCommand(0x96, sequence_++);
-    writeCharacteristic_->writeValue(const_cast<uint8_t*>(deviceInfo.data()), deviceInfo.size(), false);
-    writeCharacteristic_->writeValue(const_cast<uint8_t*>(cellInfo.data()), cellInfo.size(), false);
+    // ESPHome zostawia bajt 16 na 0; niezerowy licznik na 0x96 daje ACK C8, ale bez strumienia 0x02.
+    const auto frame = JkBmsProtocol::buildReadCommand(command, 0);
+    writeCharacteristic_->writeValue(const_cast<uint8_t*>(frame.data()), frame.size(), false);
     lastRequestMs_ = millis();
     if (verbose_) {
-      printHex("JK TX DEVICE INFO", deviceInfo.data(), deviceInfo.size());
-      printHex("JK TX SETTINGS/STREAM", cellInfo.data(), cellInfo.size());
+      if (command == 0x97) printHex("JK TX DEVICE INFO", frame.data(), frame.size());
+      else if (command == 0x96) printHex("JK TX CELL STREAM", frame.data(), frame.size());
+      else printHex("JK TX", frame.data(), frame.size());
     }
   }
 
+  void pollCommands(uint32_t now) {
+    if (gotCellStream_) return;
+    if (!gotDeviceInfo_) {
+      if (lastRequestMs_ == 0 || now - lastRequestMs_ >= kDeviceInfoRetryMs) sendCommand(0x97);
+      return;
+    }
+    if (lastRequestMs_ == 0 || now - lastRequestMs_ >= kCellInfoRetryMs) sendCommand(0x96);
+  }
+
   void onNotify(const uint8_t* data, size_t length) {
+    lastNotifyMs_ = millis();
     if (verbose_) printHex("JK NOTIFY", data, length);
+    if (length >= 7 && data[0] == 0xAA && data[1] == 0x55 && data[2] == 0x90 && data[3] == 0xEB && data[4] == 0xC8) {
+      Serial.printf("JK CMD ACK %s\n", data[6] ? "OK" : "REJECT");
+      return;
+    }
     static constexpr uint8_t header[] = {0x55, 0xAA, 0xEB, 0x90};
     size_t start = 0;
     if (length >= sizeof(header) && std::memcmp(data, header, sizeof(header)) == 0) {
@@ -286,14 +343,20 @@ class JkBmsBleDriver::Impl : public BLEAdvertisedDeviceCallbacks, public BLEClie
     if (verbose_) Serial.printf("JK FRAME OK type=0x%02X count=%lu\n", frame_[4], static_cast<unsigned long>(validFrames_));
     if (frame_[4] == 0x03 && JkBmsProtocol::decodeDeviceInfo(frame_, JkBmsProtocol::FrameSize, model_, sizeof(model_),
                                                               hardware_, sizeof(hardware_), software_, sizeof(software_))) {
+      gotDeviceInfo_ = true;
+      if (protocolHint_ == BatteryProtocol::Unknown && hardware_[0] == '1' && hardware_[1] == '1') {
+        protocolHint_ = BatteryProtocol::Jk02_32S;
+      }
       Serial.printf("JK DEVICE model=%s hw=%s sw=%s\n", model_, hardware_, software_);
       return;
     }
     BatteryData decoded;
     if (!JkBmsProtocol::decode(frame_, JkBmsProtocol::FrameSize, decoded, protocolHint_, millis())) {
       if (frame_[4] == 0x02) Serial.println("JK FRAME: wariant niejednoznaczny; w probe wymus p auto|24|32|04");
+      if (frame_[4] == 0x01) Serial.println("JK FRAME: ustawienia 0x01 (strumien cel powinien ruszyc)");
       return;
     }
+    gotCellStream_ = true;
     portENTER_CRITICAL(&dataMux_);
     battery_ = decoded;
     portEXIT_CRITICAL(&dataMux_);
@@ -321,6 +384,9 @@ class JkBmsBleDriver::Impl : public BLEAdvertisedDeviceCallbacks, public BLEClie
   volatile bool connected_ = false;
   bool autoConnect_ = true;
   bool verbose_ = false;
+  bool dumpedServices_ = false;
+  volatile bool gotDeviceInfo_ = false;
+  volatile bool gotCellStream_ = false;
   char targetMac_[18]{};
   char candidateMac_[18]{};
   char connectedMac_[18]{};
@@ -328,7 +394,6 @@ class JkBmsBleDriver::Impl : public BLEAdvertisedDeviceCallbacks, public BLEClie
   char hardware_[9]{};
   char software_[9]{};
   esp_ble_addr_type_t candidateAddressType_ = BLE_ADDR_TYPE_PUBLIC;
-  uint8_t sequence_ = 0;
   uint8_t frame_[JkBmsProtocol::MaxFrameSize]{};
   size_t assemblerLength_ = 0;
   size_t headerMatch_ = 0;
@@ -337,6 +402,7 @@ class JkBmsBleDriver::Impl : public BLEAdvertisedDeviceCallbacks, public BLEClie
   volatile uint32_t lastAttemptMs_ = 0;
   volatile uint32_t lastRequestMs_ = 0;
   volatile uint32_t lastValidFrameMs_ = 0;
+  volatile uint32_t lastNotifyMs_ = 0;
   uint32_t lastLoggedMs_ = 0;
 };
 
