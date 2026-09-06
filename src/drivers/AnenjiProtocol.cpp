@@ -15,6 +15,14 @@ float clampPositivePowerW(uint16_t raw) {
   if (watts < 0 || watts > static_cast<int16_t>(kMaxPlausiblePowerW)) return 0.0f;
   return static_cast<float>(watts);
 }
+
+float signedPowerW(uint16_t raw) {
+  const int16_t watts = asI16(raw);
+  if (watts > static_cast<int16_t>(kMaxPlausiblePowerW) || watts < -static_cast<int16_t>(kMaxPlausiblePowerW)) {
+    return 0.0f;
+  }
+  return static_cast<float>(watts);
+}
 }
 
 uint16_t crc16(const uint8_t* data, size_t length) {
@@ -87,20 +95,42 @@ bool extractReadHoldingResponse(const uint8_t* data, size_t length, uint8_t expe
 
 bool decodeLiveBlock(const uint16_t* registers, size_t count, LiveReading& reading) {
   if (!registers || count < kLiveRegisterCount) return false;
+  for (size_t index = 0; index < kLiveRegisterCount; ++index) reading.liveRegs[index] = registers[index];
+  reading.flags = registers[kFaultOrFlags];
   reading.operationMode = registers[kOperationMode];
-  reading.outputVoltageV = scaleU16(registers[kOutputVoltage], 0.1f);
+  reading.mainsVoltageV = scaleU16(registers[kMainsVoltage], 0.1f);
+  reading.mainsFrequencyHz = scaleU16(registers[kMainsFrequency], 0.01f);
+  reading.mainsPowerW = signedPowerW(registers[kMainsPower]);
+  reading.inverterVoltageV = scaleU16(registers[kInverterVoltage], 0.1f);
+  reading.inverterCurrentA = scaleU16(registers[kInverterCurrent], 0.1f);
+  reading.inverterFrequencyHz = scaleU16(registers[kInverterFrequency], 0.01f);
   reading.inverterPowerW = clampPositivePowerW(registers[kInverterPower]);
+  reading.inverterChargePowerW = clampPositivePowerW(registers[kInverterChargePower]);
+  reading.outputVoltageV = scaleU16(registers[kOutputVoltage], 0.1f);
+  reading.outputCurrentA = scaleU16(registers[kOutputCurrent], 0.1f);
+  reading.outputFrequencyHz = scaleU16(registers[kOutputFrequency], 0.01f);
   reading.loadPowerW = clampPositivePowerW(registers[kOutputActivePower]);
+  reading.outputApparentPowerVa = clampPositivePowerW(registers[kOutputApparentPower]);
   reading.batteryVoltageV = scaleU16(registers[kBatteryVoltage], 0.1f);
   reading.batteryCurrentA = scaleI16(registers[kBatteryCurrent], 0.1f);
+  reading.batteryPowerW = signedPowerW(registers[kBatteryPower]);
+  reading.dcBusVoltageV = scaleU16(registers[kDcBusVoltage], 0.1f);
   reading.pvVoltageV = scaleU16(registers[kPvVoltage], 0.1f);
+  reading.pvCurrentA = scaleU16(registers[kPvCurrent], 0.1f);
   return true;
 }
 
 bool decodeStatusBlock(const uint16_t* registers, size_t count, LiveReading& reading) {
   if (!registers || count < kStatusRegisterCount) return false;
+  for (size_t index = 0; index < kStatusRegisterCount; ++index) reading.statusRegs[index] = registers[index];
+  reading.statusOk = true;
   reading.pvPowerW = clampPositivePowerW(registers[kPvPower]);
+  reading.pvChargePowerW = clampPositivePowerW(registers[kPvChargePower]);
   reading.loadPercent = registers[kLoadPercent];
+  reading.dcdcTemperatureC = static_cast<float>(registers[kDcdcTemperature]);
+  reading.inverterTemperatureC = static_cast<float>(registers[kInverterTemperature]);
+  reading.batterySocPercent = registers[kBatterySoc];
+  reading.batteryCurrent2A = scaleI16(registers[kBatteryCurrent2], 0.1f);
   return true;
 }
 

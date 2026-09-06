@@ -79,6 +79,16 @@ int main() {
   expectNear(low.batteryVoltageV, 27.0f, 0.01f, "battery 27.0 V");
   expectNear(low.batteryCurrentA, -5.6f, 0.05f, "battery current 216=-5.6 A");
   expectNear(low.pvVoltageV, 16.8f, 0.05f, "PV voltage 219=16.8 V not power");
+  expectNear(low.mainsVoltageV, 0.0f, 0.01f, "mains V 0 when off-grid");
+  expectNear(low.inverterVoltageV, 230.0f, 0.05f, "inverter 205=230.0 V");
+  expectNear(low.inverterCurrentA, 1.0f, 0.05f, "inverter 206=1.0 A");
+  expectNear(low.inverterFrequencyHz, 50.0f, 0.05f, "inverter 50 Hz");
+  expectNear(low.outputCurrentA, 0.6f, 0.05f, "output 211=0.6 A");
+  expectNear(low.outputApparentPowerVa, 138.0f, 0.01f, "apparent 214=138 VA");
+  expectNear(low.batteryPowerW, -113.0f, 0.01f, "battery power 217=-113 W");
+  expectNear(low.dcBusVoltageV, 370.9f, 0.05f, "DC bus 218=370.9 V");
+  expectNear(low.pvCurrentA, 0.0f, 0.01f, "PV current 220=0 A");
+  expectEq(low.flags, 0xB000, "flags 200=0xB000");
 
   // Later sniff with a large load (~914 W). Same commands, new values.
   const uint8_t liveHigh[] = {
@@ -109,6 +119,11 @@ int main() {
   expect(AnenjiProtocol::decodeStatusBlock(statusRegs, 13, high), "decode status 223");
   expectNear(high.pvPowerW, 0.0f, 0.01f, "PV power 223=0 W at night");
   expectEq(high.loadPercent, 21, "load 21% of 4200 W");
+  expectNear(high.dcdcTemperatureC, 22.0f, 0.01f, "DCDC 22 C");
+  expectNear(high.inverterTemperatureC, 25.0f, 0.01f, "inverter 25 C");
+  expectEq(high.batterySocPercent, 86, "inverter SOC 86%");
+  expectNear(high.batteryCurrent2A, -37.8f, 0.05f, "status 232=-37.8 A");
+  expectNear(high.dcBusVoltageV, 359.7f, 0.05f, "high-load DC bus 359.7 V");
 
   uint8_t broken[sizeof(liveHigh)]{};
   for (size_t i = 0; i < sizeof(liveHigh); ++i) broken[i] = liveHigh[i];

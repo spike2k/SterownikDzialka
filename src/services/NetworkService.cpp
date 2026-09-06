@@ -5,6 +5,7 @@
 #include <time.h>
 #include "AppConfig.h"
 #include "TlsCertificates.h"
+#include "core/TelemetryJson.h"
 
 namespace {
 constexpr time_t kMinimumValidTime = 1704067200;
@@ -35,7 +36,7 @@ void NetworkService::begin(RelayController& relays, Settings& settings) {
   mqtt_.setCallback([this](char* topic, uint8_t* payload, unsigned int length) {
     onMqtt(topic, payload, length);
   });
-  mqtt_.setBufferSize(1536);
+  mqtt_.setBufferSize(4096);
   connectWifi();
 }
 
@@ -199,7 +200,7 @@ bool NetworkService::clockReady() {
 }
 
 void NetworkService::publish(const Telemetry& telemetry) {
-  const String json = telemetryJson(telemetry);
+  const String json = mqttTelemetryJson(telemetry);
   mqtt_.publish(Config::mqttStateTopic, json.c_str(), true);
 }
 
@@ -251,17 +252,3 @@ void NetworkService::onMqtt(char* topic, uint8_t* payload, unsigned int length) 
   relays_->setRelay(static_cast<size_t>(index), enabled);
 }
 
-String NetworkService::telemetryJson(const Telemetry& telemetry) const {
-  String json;
-  json.reserve(640);
-  json += "{\"pvW\":" + String(telemetry.pvPowerW, 0);
-  json += ",\"loadW\":" + String(telemetry.loadPowerW, 0);
-  json += ",\"soc\":" + String(telemetry.batterySoc, 1);
-  json += ",\"batteryV\":" + String(telemetry.batteryVoltageV, 2);
-  json += ",\"batteryA\":" + String(telemetry.batteryCurrentA, 1);
-  json += ",\"jk\":" + String(telemetry.jkOnline ? "true" : "false");
-  json += ",\"anenji\":" + String(telemetry.anenjiOnline ? "true" : "false");
-  json += ",\"pylon\":" + String(telemetry.pylonOnline ? "true" : "false");
-  json += "}";
-  return json;
-}

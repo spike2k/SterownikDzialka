@@ -33,7 +33,6 @@ class NetworkService {
   void publishLoadCommands(bool force);
   bool publishLoad(const char* key, bool enabled);
   void onMqtt(char* topic, uint8_t* payload, unsigned int length);
-  String telemetryJson(const Telemetry& telemetry) const;
 
   WiFiClientSecure mqttTlsClient_;
   PubSubClient mqtt_{mqttTlsClient_};

@@ -106,6 +106,7 @@ bool AnenjiDriver::poll(Telemetry& telemetry) {
 #else
   if (!enabled_) {
     telemetry.anenjiOnline = false;
+    telemetry.inverter = {};
     return false;
   }
 
@@ -138,6 +139,7 @@ bool AnenjiDriver::poll(Telemetry& telemetry) {
 
   telemetry.pvPowerW = live.pvPowerW;
   telemetry.loadPowerW = live.loadPowerW;
+  telemetry.inverter = live;
   telemetry.anenjiOnline = true;
   telemetry.updatedAtMs = millis();
 
@@ -198,6 +200,7 @@ void AnenjiDriver::markOffline(Telemetry& telemetry, const char* reason, const u
   telemetry.anenjiOnline = false;
   telemetry.pvPowerW = 0;
   telemetry.loadPowerW = 0;
+  telemetry.inverter = {};
   if (wasOnline_ || shouldLog(kFailLogMs)) {
     Serial.print("ANENJI OFF ");
     Serial.print(reason);

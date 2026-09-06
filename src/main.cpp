@@ -7,6 +7,8 @@
 #include "core/RelayController.h"
 #include "core/Settings.h"
 #include "core/Telemetry.h"
+
+#include <cstring>
 #include "drivers/AnenjiDriver.h"
 #include "drivers/JkBmsBleDriver.h"
 #include "drivers/PylontechEmulator.h"
@@ -61,6 +63,19 @@ void loop() {
 
   jkBms.tick(batteryData);
   telemetry.jkOnline = batteryData.online;
+  telemetry.bms = batteryData;
+  strncpy(telemetry.jkMac, jkBms.mac() ? jkBms.mac() : "", sizeof(telemetry.jkMac) - 1);
+  telemetry.jkMac[sizeof(telemetry.jkMac) - 1] = '\0';
+  strncpy(telemetry.jkModel, jkBms.deviceModel() ? jkBms.deviceModel() : "", sizeof(telemetry.jkModel) - 1);
+  telemetry.jkModel[sizeof(telemetry.jkModel) - 1] = '\0';
+  strncpy(telemetry.jkHardware, jkBms.hardwareVersion() ? jkBms.hardwareVersion() : "",
+          sizeof(telemetry.jkHardware) - 1);
+  telemetry.jkHardware[sizeof(telemetry.jkHardware) - 1] = '\0';
+  strncpy(telemetry.jkSoftware, jkBms.softwareVersion() ? jkBms.softwareVersion() : "",
+          sizeof(telemetry.jkSoftware) - 1);
+  telemetry.jkSoftware[sizeof(telemetry.jkSoftware) - 1] = '\0';
+  telemetry.jkValidFrames = jkBms.validFrames();
+  telemetry.jkInvalidFrames = jkBms.invalidFrames();
   if (batteryData.online) {
     telemetry.batterySoc = batteryData.socPercent;
     telemetry.batteryVoltageV = batteryData.packVoltageV;

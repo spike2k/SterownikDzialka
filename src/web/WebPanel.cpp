@@ -5,23 +5,10 @@
 #include <cstring>
 #include "AppConfig.h"
 #include "core/Settings.h"
+#include "core/TelemetryJson.h"
 #include "web/PanelPage.h"
 
 namespace {
-String jsonEscape(const char* text) {
-  String out = "\"";
-  if (!text) return out + "\"";
-  for (const char* cursor = text; *cursor; ++cursor) {
-    if (*cursor == '"' || *cursor == '\\') out += '\\';
-    if (*cursor == '\n') {
-      out += "\\n";
-      continue;
-    }
-    out += *cursor;
-  }
-  out += '"';
-  return out;
-}
 
 void copyZ(char* dest, size_t size, const String& src) {
   strncpy(dest, src.c_str(), size - 1);
@@ -367,7 +354,7 @@ String WebPanel::stateJson() const {
   }
 
   String json;
-  json.reserve(3600);
+  json.reserve(5200);
   json += "{\"pvW\":" + String(telemetry_->pvPowerW, 1);
   json += ",\"loadW\":" + String(telemetry_->loadPowerW, 1);
   json += ",\"soc\":" + String(telemetry_->batterySoc, 1);
@@ -419,6 +406,10 @@ String WebPanel::stateJson() const {
     json += "{\"pin\":" + String(inputs_->pin(index));
     json += ",\"on\":" + String(inputs_->active(index) ? "true" : "false") + "}";
   }
-  json += "]}";
+  json += "],\"inverter\":";
+  appendInverterJson(json, *telemetry_);
+  json += ",\"bms\":";
+  appendBmsJson(json, *telemetry_);
+  json += "}";
   return json;
 }

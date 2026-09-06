@@ -40,6 +40,10 @@ void test32() {
   frame[173] = 87;
   frame[198] = 1;
   frame[199] = 1;
+  put16(frame, 144, 315);
+  put32(frame, 174, 50000);
+  put32(frame, 178, 100000);
+  put32(frame, 182, 12);
   seal(frame);
   BatteryData data;
   assert(JkBmsProtocol::decode(frame, sizeof(frame), data, BatteryProtocol::Unknown, 42));
@@ -50,6 +54,10 @@ void test32() {
   assert(data.socPercent == 87);
   assert(data.chargeMosOn && data.dischargeMosOn && data.balancing);
   assert(data.alarms == 0x20);
+  assert(std::fabs(data.mosTemperatureC - 31.5f) < 0.05f);
+  assert(std::fabs(data.remainingCapacityAh - 50.0f) < 0.001f);
+  assert(std::fabs(data.fullCapacityAh - 100.0f) < 0.001f);
+  assert(data.cycleCount == 12);
 }
 
 void test24() {

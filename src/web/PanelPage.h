@@ -68,6 +68,17 @@ form .g{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));ga
 label{display:flex;flex-direction:column;gap:6px;color:var(--muted);font-size:.82rem}
 input,select{background:#0b1420;border:1px solid var(--line);border-radius:10px;color:var(--ink);padding:10px}
 .help{color:var(--muted);font-size:.85rem;line-height:1.45;margin:0 0 12px}
+.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:8px}
+.kv-item{background:#0b1420;border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.kv-item span{display:block;color:var(--muted);font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}
+.kv-item b{font-variant-numeric:tabular-nums;font-size:1.02rem;font-weight:700}
+.kv-item small{color:var(--muted);font-weight:600}
+.mos{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 12px}
+.mos .pill{font-size:.82rem}
+.regs{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.78rem}
+.regs span{background:#0b1420;border:1px solid var(--line);border-radius:8px;padding:6px 8px}
+.regs i{color:var(--muted);font-style:normal;display:block;font-size:.68rem}
+.raw{margin:0;overflow:auto;background:#071018;border:1px solid var(--line);border-radius:12px;padding:12px;color:#c5e1ff;font-size:.72rem;line-height:1.45;max-height:280px}
 .toast{position:fixed;bottom:16px;right:16px;background:#123d2c;color:var(--go);padding:12px 14px;border-radius:12px;display:none}
 .toast.err{background:#3d141b;color:var(--stop)}
 @media(max-width:820px){.strip{grid-template-columns:repeat(2,1fr)}.hero,.metrics{grid-template-columns:1fr}.loadrow{grid-template-columns:1fr 1fr}}
@@ -86,6 +97,7 @@ input,select{background:#0b1420;border:1px solid var(--line);border-radius:10px;
 <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V6M6 11l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2.4"/></symbol>
 <symbol id="i-dn" viewBox="0 0 24 24"><path d="M12 5v13M6 13l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4"/></symbol>
 <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" stroke="currentColor" stroke-width="2"/></symbol>
+<symbol id="i-nerd" viewBox="0 0 24 24"><circle cx="8" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="16" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M11.2 12h1.6M4.8 12H3M21 12h-1.8M8 9.2V7M16 9.2V7" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
 </svg>
 <main class="wrap">
 <header>
@@ -95,6 +107,7 @@ input,select{background:#0b1420;border:1px solid var(--line);border-radius:10px;
   </div>
   <div class="row">
     <span class="badge" id="mode">AUTO</span>
+    <button class="iconbtn" id="nerdBtn" title="Statystyki dla nerdów" onclick="showNerd(true)"><svg width="22" height="22"><use href="#i-nerd"/></svg></button>
     <button class="iconbtn" id="cfgBtn" title="Konfiguracja" onclick="showCfg(true)"><svg width="22" height="22"><use href="#i-gear"/></svg></button>
   </div>
 </header>
@@ -180,6 +193,41 @@ input,select{background:#0b1420;border:1px solid var(--line);border-radius:10px;
   </section>
 </section>
 
+<section id="nerd" class="hidden">
+  <article class="card">
+    <div class="row" style="justify-content:space-between;margin-bottom:12px">
+      <h2 style="margin:0">Statystyki dla nerdów</h2>
+      <button class="act" onclick="showNerd(false)">Dashboard</button>
+    </div>
+    <p class="help">Pełny zrzut tego, co sterownik zbiera z falownika (Modbus 200–221 i 223–235) i JK-BMS (ramka 0x02 + info 0x03). Te same obiekty <code>inverter</code> i <code>bms</code> idą na MQTT w <code>ems/sterownik-dzialka/state</code>.</p>
+  </article>
+  <section class="section card">
+    <h2>Falownik Anenji / SMG-II</h2>
+    <div id="nerdInvEmpty" class="empty"><svg width="22" height="22"><use href="#i-warn"/></svg>Brak połączenia z falownikiem</div>
+    <div id="nerdInv" class="hidden">
+      <div class="kv" id="nerdInvKv"></div>
+      <h2 style="margin-top:16px">Rejestry live 200–221</h2>
+      <div class="regs" id="nerdLiveRegs"></div>
+      <h2 style="margin-top:16px">Rejestry status 223–235</h2>
+      <div class="regs" id="nerdStatusRegs"></div>
+    </div>
+  </section>
+  <section class="section card">
+    <h2>JK BMS</h2>
+    <div id="nerdBmsEmpty" class="empty"><svg width="22" height="22"><use href="#i-warn"/></svg>Brak połączenia z BMS</div>
+    <div id="nerdBms" class="hidden">
+      <div class="mos" id="nerdMos"></div>
+      <div class="kv" id="nerdBmsKv"></div>
+      <h2 style="margin-top:16px">Cele i rezystancje</h2>
+      <div class="cells" id="nerdCells"></div>
+    </div>
+  </section>
+  <section class="section card">
+    <h2>Surowy JSON (inverter + bms)</h2>
+    <pre class="raw" id="nerdJson"></pre>
+  </section>
+</section>
+
 <section id="cfg" class="hidden">
   <article class="card">
     <div class="row" style="justify-content:space-between;margin-bottom:12px">
@@ -254,7 +302,16 @@ input,select{background:#0b1420;border:1px solid var(--line);border-radius:10px;
 const q=id=>document.getElementById(id);
 let defaults=null;
 function toast(msg,err){const t=q('toast');t.textContent=msg;t.className='toast'+(err?' err':'');t.style.display='block';setTimeout(()=>t.style.display='none',3200)}
-function showCfg(on){q('dash').classList.toggle('hidden',on);q('cfg').classList.toggle('hidden',!on);q('cfgBtn').classList.toggle('on',on);if(on)loadCfg()}
+function showView(name){
+  q('dash').classList.toggle('hidden',name!=='dash');
+  q('cfg').classList.toggle('hidden',name!=='cfg');
+  q('nerd').classList.toggle('hidden',name!=='nerd');
+  q('cfgBtn').classList.toggle('on',name==='cfg');
+  q('nerdBtn').classList.toggle('on',name==='nerd');
+  if(name==='cfg') loadCfg();
+}
+function showCfg(on){showView(on?'cfg':'dash')}
+function showNerd(on){showView(on?'nerd':'dash')}
 function st(id,ok,good,bad){const el=q(id);el.className='st '+(ok?'ok':'bad');el.querySelector('small').textContent=ok?good:bad}
 function setMetric(id,online){q(id).classList.toggle('down',!online)}
 async function call(url){await fetch(url,{method:'POST'});await refresh()}
@@ -366,7 +423,89 @@ async function refresh(){
     const ins=s.inputs.filter(x=>x.pin>=0);
     q('inputsWrap').classList.toggle('hidden',!ins.length);
     q('inputs').innerHTML=s.inputs.map((x,i)=>x.pin<0?'':`<div class="card relay"><span>${esc(nm(s.inputNames,i,'Wejście '+(i+1)))}<br><small style="color:var(--muted)">GPIO ${x.pin}</small></span><b style="color:${x.on?'var(--go)':'var(--muted)'}">${x.on?'ON':'OFF'}</b></div>`).join('');
+    renderNerd(s);
   }catch(e){q('ip').textContent='brak połączenia ze sterownikiem'}
+}
+function n(v,d){return v==null||!isFinite(Number(v))?'—':Number(v).toFixed(d)}
+function kv(label,value){return `<div class="kv-item"><span>${esc(label)}</span><b>${value}</b></div>`}
+function pill(label,on){return `<div class="pill ${on?'ok':'warn'}">${esc(label)} ${on?'ON':'OFF'}</div>`}
+function regsHtml(start,arr){
+  if(!arr||!arr.length) return '—';
+  return arr.map((v,i)=>`<span><i>${start+i}</i>${v}</span>`).join('');
+}
+function renderNerd(s){
+  const inv=s.inverter||{};
+  const bms=s.bms||{};
+  q('nerdInvEmpty').classList.toggle('hidden',!!inv.online);
+  q('nerdInv').classList.toggle('hidden',!inv.online);
+  if(inv.online){
+    q('nerdInvKv').innerHTML=[
+      kv('Tryb',esc(inv.mode||'—')+' ('+n(inv.modeId,0)+')'),
+      kv('Flagi 200','0x'+Number(inv.flags||0).toString(16).toUpperCase()),
+      kv('Sieć',n(inv.mainsV,1)+' V · '+n(inv.mainsHz,2)+' Hz · '+n(inv.mainsW,0)+' W'),
+      kv('Mostek',n(inv.inverterV,1)+' V · '+n(inv.inverterA,1)+' A · '+n(inv.inverterHz,2)+' Hz'),
+      kv('Moc mostka',n(inv.inverterW,0)+' W'),
+      kv('Ładowanie z mostka',n(inv.inverterChargeW,0)+' W'),
+      kv('Wyjście AC',n(inv.outputV,1)+' V · '+n(inv.outputA,1)+' A · '+n(inv.outputHz,2)+' Hz'),
+      kv('Odbiór domu',n(inv.loadW,0)+' W · '+n(inv.loadVa,0)+' VA · '+n(inv.loadPercent,0)+' %'),
+      kv('Bateria (falownik)',n(inv.batteryV,1)+' V · '+n(inv.batteryA,1)+' A · '+n(inv.batteryW,0)+' W'),
+      kv('Prąd baterii #2',n(inv.batteryA2,1)+' A'),
+      kv('SOC falownika',n(inv.batterySoc,0)+' %'),
+      kv('Szyna DC',n(inv.dcBusV,1)+' V'),
+      kv('PV',n(inv.pvV,1)+' V · '+n(inv.pvA,1)+' A · '+n(inv.pvW,0)+' W'),
+      kv('PV → ładowanie',n(inv.pvChargeW,0)+' W'),
+      kv('Temp. DCDC',n(inv.dcdcC,0)+' °C'),
+      kv('Temp. falownika',n(inv.inverterC,0)+' °C'),
+      kv('Blok status',inv.statusOk?'OK':'brak')
+    ].join('');
+    q('nerdLiveRegs').innerHTML=regsHtml(200,inv.liveRegs);
+    q('nerdStatusRegs').innerHTML=regsHtml(223,inv.statusRegs);
+  }
+  q('nerdBmsEmpty').classList.toggle('hidden',!!bms.online);
+  q('nerdBms').classList.toggle('hidden',!bms.online);
+  const ident=[
+    kv('MAC',esc(bms.mac||'—')),
+    kv('Model',esc(bms.model||'—')),
+    kv('HW / SW',esc((bms.hw||'—')+' / '+(bms.sw||'—'))),
+    kv('Protokół',esc(bms.protocol||'—')),
+    kv('Ramki OK / złe',n(bms.validFrames,0)+' / '+n(bms.invalidFrames,0))
+  ];
+  if(bms.online){
+    q('nerdMos').innerHTML=[
+      pill('Charge MOS',!!bms.chargeMos),
+      pill('Discharge MOS',!!bms.dischargeMos),
+      pill('Precharge',!!bms.precharge),
+      pill('Balans',!!bms.balancing),
+      pill('Grzałka',!!bms.heating)
+    ].join('');
+    const temps=(bms.tempsC||[]).map((t,i)=>'T'+(i+1)+' '+n(t,1)+' °C').join(' · ')||'—';
+    q('nerdBmsKv').innerHTML=ident.concat([
+      kv('Paczka',n(bms.packV,3)+' V · '+n(bms.currentA,3)+' A · '+n(bms.powerW,1)+' W'),
+      kv('SOC / SOH',n(bms.soc,0)+' % / '+n(bms.soh,0)+' %'),
+      kv('Pojemność',n(bms.remainingAh,2)+' / '+n(bms.fullAh,2)+' Ah'),
+      kv('Cykle',n(bms.cycles,0)+' · '+n(bms.cycleAh,1)+' Ah'),
+      kv('Runtime',esc(bms.runtime||'—')),
+      kv('Temp. MOS',n(bms.mosC,1)+' °C'),
+      kv('Czujniki',esc(temps)),
+      kv('Prąd balansu',n(bms.balanceA,3)+' A · status '+n(bms.balancerStatus,0)),
+      kv('Alarmy',esc(bms.alarmsHex||('0x'+Number(bms.alarms||0).toString(16)))),
+      kv('Cele min/max', 'C'+n(bms.cellMin,0)+' '+n(bms.cellMinV,3)+' V · C'+n(bms.cellMax,0)+' '+n(bms.cellMaxV,3)+' V'),
+      kv('Δ / średnia',n(bms.cellDeltaV,3)+' V · '+n(bms.cellAvgV,3)+' V')
+    ]).join('');
+    const cells=bms.cells||[];
+    const r=bms.resistances||[];
+    q('nerdCells').innerHTML=cells.map((v,i)=>{
+      const ohm=r[i];
+      const ohmTxt=ohm>0?('<small>'+n(ohm,3)+' Ω</small>'):'';
+      return `<div class="cell">C${i+1}<b>${n(v,3)} V</b>${ohmTxt}</div>`;
+    }).join('')||'—';
+  } else {
+    q('nerdMos').innerHTML='';
+    q('nerdBmsKv').innerHTML=ident.join('');
+    q('nerdBmsEmpty').classList.toggle('hidden',false);
+    q('nerdBms').classList.toggle('hidden',false);
+  }
+  try{q('nerdJson').textContent=JSON.stringify({inverter:inv,bms:bms},null,2)}catch(e){q('nerdJson').textContent='(błąd JSON)'}
 }
 refresh();setInterval(refresh,2000);
 </script>

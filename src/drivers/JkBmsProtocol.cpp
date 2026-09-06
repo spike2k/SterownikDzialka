@@ -37,9 +37,14 @@ void finishCells(BatteryData& battery) {
   battery.maxCellVoltageV = 0.0f;
   battery.minCellNumber = 0;
   battery.maxCellNumber = 0;
+  battery.averageCellVoltageV = 0.0f;
+  float sum = 0.0f;
+  size_t valid = 0;
   for (size_t i = 0; i < battery.cellCount; ++i) {
     const float value = battery.cellVoltageV[i];
     if (!(value > 0.1f && value < 6.0f)) continue;
+    sum += value;
+    ++valid;
     if (battery.minCellNumber == 0 || value < battery.minCellVoltageV) {
       battery.minCellVoltageV = value;
       battery.minCellNumber = static_cast<uint8_t>(i + 1);
@@ -52,6 +57,7 @@ void finishCells(BatteryData& battery) {
   battery.deltaCellVoltageV = battery.maxCellNumber && battery.minCellNumber
                                   ? battery.maxCellVoltageV - battery.minCellVoltageV
                                   : 0.0f;
+  if (valid) battery.averageCellVoltageV = sum / static_cast<float>(valid);
 }
 
 int scoreJk02(const uint8_t* data, bool is32) {
@@ -87,34 +93,49 @@ bool looksLikeJk04(const uint8_t* data) {
 void decodeJk02(const uint8_t* data, BatteryData& battery, BatteryProtocol protocol) {
   const bool is32 = protocol == BatteryProtocol::Jk02_32S;
   const size_t cellSlots = is32 ? 32 : 24;
-  const size_t offset = is32 ? 32 : 0;
+  const size_t packOffset = is32 ? 32 : 0;
+  const size_t resistanceOffset = is32 ? 16 : 0;
   battery.cellVoltageV.fill(0.0f);
+  battery.cellResistanceOhm.fill(0.0f);
   battery.cellCount = 0;
   for (size_t i = 0; i < cellSlots; ++i) {
     const float cell = static_cast<float>(u16le(data, 6 + i * 2)) * 0.001f;
     battery.cellVoltageV[i] = cell;
+    battery.cellResistanceOhm[i] = static_cast<float>(u16le(data, 64 + resistanceOffset + i * 2)) * 0.001f;
     if (cell > 0.1f && cell < 6.0f) battery.cellCount = i + 1;
   }
-  battery.packVoltageV = static_cast<float>(u32le(data, 118 + offset)) * 0.001f;
-  battery.currentA = static_cast<float>(static_cast<int32_t>(u32le(data, 126 + offset))) * 0.001f;
+  battery.packVoltageV = static_cast<float>(u32le(data, 118 + packOffset)) * 0.001f;
+  battery.currentA = static_cast<float>(static_cast<int32_t>(u32le(data, 126 + packOffset))) * 0.001f;
   battery.powerW = battery.packVoltageV * battery.currentA;
   battery.temperaturesC.fill(0.0f);
-  battery.temperaturesC[0] = static_cast<float>(static_cast<int16_t>(u16le(data, 130 + offset))) * 0.1f;
-  battery.temperaturesC[1] = static_cast<float>(static_cast<int16_t>(u16le(data, 132 + offset))) * 0.1f;
+  battery.temperaturesC[0] = static_cast<float>(static_cast<int16_t>(u16le(data, 130 + packOffset))) * 0.1f;
+  battery.temperaturesC[1] = static_cast<float>(static_cast<int16_t>(u16le(data, 132 + packOffset))) * 0.1f;
   battery.temperatureCount = 2;
   if (is32) {
+    battery.mosTemperatureC = static_cast<float>(static_cast<int16_t>(u16le(data, 112 + packOffset))) * 0.1f;
+    battery.alarms = u32le(data, 166);
     battery.temperaturesC[2] = static_cast<float>(static_cast<int16_t>(u16le(data, 258))) * 0.1f;
     battery.temperaturesC[3] = static_cast<float>(static_cast<int16_t>(u16le(data, 256))) * 0.1f;
     battery.temperaturesC[4] = static_cast<float>(static_cast<int16_t>(u16le(data, 254))) * 0.1f;
     battery.temperatureCount = 5;
-    battery.alarms = u32le(data, 166);
   } else {
+    battery.mosTemperatureC = static_cast<float>(static_cast<int16_t>(u16le(data, 134))) * 0.1f;
     battery.alarms = u16le(data, 136);
   }
-  battery.balancing = data[140 + offset] != 0;
-  battery.socPercent = static_cast<float>(data[141 + offset]);
-  battery.chargeMosOn = data[166 + offset] != 0;
-  battery.dischargeMosOn = data[167 + offset] != 0;
+  battery.balancingCurrentA = static_cast<float>(static_cast<int16_t>(u16le(data, 138 + packOffset))) * 0.001f;
+  battery.balancerStatus = data[140 + packOffset];
+  battery.balancing = battery.balancerStatus != 0;
+  battery.socPercent = static_cast<float>(data[141 + packOffset]);
+  battery.remainingCapacityAh = static_cast<float>(u32le(data, 142 + packOffset)) * 0.001f;
+  battery.fullCapacityAh = static_cast<float>(u32le(data, 146 + packOffset)) * 0.001f;
+  battery.cycleCount = u32le(data, 150 + packOffset);
+  battery.cycleCapacityAh = static_cast<float>(u32le(data, 154 + packOffset)) * 0.001f;
+  battery.sohPercent = data[158 + packOffset];
+  battery.runtimeSeconds = u32le(data, 162 + packOffset);
+  battery.chargeMosOn = data[166 + packOffset] != 0;
+  battery.dischargeMosOn = data[167 + packOffset] != 0;
+  battery.prechargeOn = data[168 + packOffset] != 0;
+  battery.heatingOn = data[183 + packOffset] != 0;
   battery.protocol = protocol;
   finishCells(battery);
 }

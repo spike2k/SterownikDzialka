@@ -65,15 +65,37 @@ enum StatusOffset : uint16_t {
 };
 
 struct LiveReading {
+  uint16_t flags = 0;  // 200
   uint16_t operationMode = 0;
-  float outputVoltageV = 0;
+  float mainsVoltageV = 0;
+  float mainsFrequencyHz = 0;
+  float mainsPowerW = 0;
+  float inverterVoltageV = 0;
+  float inverterCurrentA = 0;
+  float inverterFrequencyHz = 0;
   float inverterPowerW = 0;
+  float inverterChargePowerW = 0;
+  float outputVoltageV = 0;
+  float outputCurrentA = 0;
+  float outputFrequencyHz = 0;
   float loadPowerW = 0;
+  float outputApparentPowerVa = 0;
   float batteryVoltageV = 0;
   float batteryCurrentA = 0;
+  float batteryPowerW = 0;
+  float dcBusVoltageV = 0;
   float pvVoltageV = 0;
+  float pvCurrentA = 0;
   float pvPowerW = 0;
+  float pvChargePowerW = 0;
   uint16_t loadPercent = 0;
+  float dcdcTemperatureC = 0;
+  float inverterTemperatureC = 0;
+  uint16_t batterySocPercent = 0;
+  float batteryCurrent2A = 0;
+  uint16_t liveRegs[kLiveRegisterCount]{};
+  uint16_t statusRegs[kStatusRegisterCount]{};
+  bool statusOk = false;
 };
 
 uint16_t crc16(const uint8_t* data, size_t length);
