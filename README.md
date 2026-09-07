@@ -69,6 +69,18 @@ python -m platformio device monitor
 
 Polecenie `upload` uruchamiaj dopiero po podłączeniu właściwego ESP32 i sprawdzeniu pinów. Domyślnie `EMS_SIMULATION=0` — panel pokazuje błędy połączeń (BMS, falownik, Pylontech), a nie sztuczne wartości. Główne środowisko używa `min_spiffs.csv`, ponieważ firmware BLE + TLS + WWW nie mieści się w domyślnej partycji aplikacji 1,25 MB.
 
+### Aktualizacja OTA z PC
+
+Pierwszą wersję z OTA trzeba wgrać do ESP32 przez USB. Następne aktualizacje:
+
+1. Zbuduj firmware: `python -m platformio run -e esp32dev`.
+2. Wgraj `.pio/build/esp32dev/firmware.bin` jako `https://www.warsztatweb.pl/esp32/dzialka/firmware.bin`.
+3. Jednorazowo zainstaluj klienta MQTT na PC: `python -m pip install -r tools/requirements-ota.txt`.
+4. Ustaw hasło tylko w bieżącej sesji (`$env:EMS_MQTT_PASSWORD="..."` w PowerShell) albo podaj je bezpiecznie w interaktywnym pytaniu skryptu.
+5. Wyślij trigger: `python tools/ota_trigger.py`.
+
+Skrypt przed wysłaniem komendy pobiera plik z serwera i wymaga, aby jego rozmiar oraz SHA-256 były identyczne z lokalnym buildem. ESP32 ponownie liczy SHA-256 podczas pobierania i aktywuje nową partycję wyłącznie po zgodnej weryfikacji. Komenda MQTT to nieutrwalona wiadomość zawierająca 64-znakowy SHA-256 na `ems/sterownik-dzialka/ota/set`; wynik jest publikowany na `ems/sterownik-dzialka/ota/status`. Adres firmware jest stały w urządzeniu i używa HTTPS. Nie wystawiaj panelu WWW ESP32 bezpośrednio do Internetu.
+
 ### Jednorazowy test JK-BMS BLE
 
 Szczegóły protokołu, hipotezy i procedura terenowa są w [`JK_BMS_PROTOCOL.md`](JK_BMS_PROTOCOL.md). Tester skanuje BLE, wypisuje name/MAC/RSSI, automatycznie łączy urządzenie wyglądające na JK, pokazuje services, characteristics, każde notify HEX i czytelne `BatteryData`.

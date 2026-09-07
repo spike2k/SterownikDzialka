@@ -6,6 +6,7 @@
 #include "core/RelayController.h"
 #include "core/Settings.h"
 #include "core/Telemetry.h"
+#include "services/OtaUpdater.h"
 
 class NetworkService {
  public:
@@ -32,10 +33,13 @@ class NetworkService {
   void publish(const Telemetry& telemetry);
   void publishLoadCommands(bool force);
   bool publishLoad(const char* key, bool enabled);
+  void handlePendingOta();
+  void publishOtaStatus(const char* state, const char* detail = nullptr);
   void onMqtt(char* topic, uint8_t* payload, unsigned int length);
 
   WiFiClientSecure mqttTlsClient_;
   PubSubClient mqtt_{mqttTlsClient_};
+  OtaUpdater otaUpdater_;
   RelayController* relays_ = nullptr;
   Settings* settings_ = nullptr;
   uint32_t lastWifiAttemptMs_ = 0;
@@ -49,4 +53,5 @@ class NetworkService {
   char lastLoadKey_[Config::loadCount][Config::labelBytes] = {};
   bool lastLoadOn_[Config::loadCount] = {};
   bool lastLoadKeyValid_[Config::loadCount] = {};
+  char pendingOtaSha256_[65] = {};
 };

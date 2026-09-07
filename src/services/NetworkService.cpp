@@ -11,6 +11,14 @@ namespace {
 constexpr time_t kMinimumValidTime = 1704067200;
 constexpr char kOnline[] = "online";
 constexpr char kOffline[] = "offline";
+
+bool validSha256(const char* value, size_t length) {
+  if (length != 64) return false;
+  for (size_t index = 0; index < length; ++index) {
+    if (!isHexadecimalDigit(value[index])) return false;
+  }
+  return true;
+}
 }
 
 void NetworkService::onWifiEvent(WiFiEvent_t event) {
@@ -58,6 +66,11 @@ void NetworkService::tick(const Telemetry& telemetry) {
       WiFi.mode(WIFI_STA);
       apEnabled_ = false;
     }
+  }
+
+  if (wifiConnected() && pendingOtaSha256_[0] != '\0') {
+    handlePendingOta();
+    return;
   }
 
   if (wifiConnected() && settings_->values.mqttHost[0] != '\0') {
@@ -174,12 +187,13 @@ void NetworkService::connectMqtt() {
     return;
   }
 
-  if (!mqtt_.subscribe(Config::mqttRelayCommandTopic, 1)) {
+  if (!mqtt_.subscribe(Config::mqttRelayCommandTopic, 1) || !mqtt_.subscribe(Config::mqttOtaCommandTopic, 1)) {
     Serial.println("MQTT subscribe error");
     mqtt_.disconnect();
     return;
   }
   mqtt_.publish(Config::mqttStatusTopic, kOnline, true);
+  publishOtaStatus("ready");
   lastMqttLoadRefreshMs_ = 0;
   for (size_t index = 0; index < Config::loadCount; ++index) lastLoadKeyValid_[index] = false;
   Serial.println("MQTT TLS OK");
@@ -233,7 +247,57 @@ bool NetworkService::publishLoad(const char* key, bool enabled) {
   return mqtt_.publish(topic, enabled ? "ON" : "OFF", false);
 }
 
+void NetworkService::handlePendingOta() {
+  char expectedSha256[sizeof(pendingOtaSha256_)];
+  memcpy(expectedSha256, pendingOtaSha256_, sizeof(expectedSha256));
+  pendingOtaSha256_[0] = '\0';
+
+  publishOtaStatus("downloading");
+  mqtt_.loop();
+  Serial.printf("OTA: pobieranie %s\n", Config::otaFirmwareUrl);
+
+  String error;
+  if (!otaUpdater_.install(expectedSha256, error)) {
+    Serial.printf("OTA error: %s\n", error.c_str());
+    publishOtaStatus("error", error.c_str());
+    return;
+  }
+
+  Serial.println("OTA: firmware zweryfikowany, restart");
+  publishOtaStatus("installed");
+  delay(250);
+  ESP.restart();
+}
+
+void NetworkService::publishOtaStatus(const char* state, const char* detail) {
+  if (!mqtt_.connected()) return;
+  String json = String("{\"state\":\"") + state + "\",\"currentFirmwareMd5\":\"" + ESP.getSketchMD5() + "\"";
+  if (detail && detail[0] != '\0') {
+    String safeDetail(detail);
+    safeDetail.replace("\\", "\\\\");
+    safeDetail.replace("\"", "\\\"");
+    json += ",\"detail\":\"" + safeDetail + "\"";
+  }
+  json += "}";
+  mqtt_.publish(Config::mqttOtaStatusTopic, json.c_str(), true);
+}
+
 void NetworkService::onMqtt(char* topic, uint8_t* payload, unsigned int length) {
+  if (strcmp(topic, Config::mqttOtaCommandTopic) == 0) {
+    if (length == 0) return;
+    if (!validSha256(reinterpret_cast<const char*>(payload), length)) {
+      publishOtaStatus("rejected", "komenda musi zawierac 64 znaki SHA-256");
+      return;
+    }
+    for (unsigned int index = 0; index < length; ++index) {
+      pendingOtaSha256_[index] = static_cast<char>(tolower(payload[index]));
+    }
+    pendingOtaSha256_[length] = '\0';
+    mqtt_.publish(Config::mqttOtaCommandTopic, "", true);
+    publishOtaStatus("accepted");
+    return;
+  }
+
   if (!relays_ || relays_->mode() != ControlMode::Manual) return;
   const String topicText(topic);
   if (!topicText.startsWith(Config::mqttRelayCommandPrefix) || !topicText.endsWith("/set")) return;
