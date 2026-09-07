@@ -95,7 +95,6 @@ bool extractReadHoldingResponse(const uint8_t* data, size_t length, uint8_t expe
 
 bool decodeLiveBlock(const uint16_t* registers, size_t count, LiveReading& reading) {
   if (!registers || count < kLiveRegisterCount) return false;
-  for (size_t index = 0; index < kLiveRegisterCount; ++index) reading.liveRegs[index] = registers[index];
   reading.flags = registers[kFaultOrFlags];
   reading.operationMode = registers[kOperationMode];
   reading.mainsVoltageV = scaleU16(registers[kMainsVoltage], 0.1f);
@@ -122,7 +121,6 @@ bool decodeLiveBlock(const uint16_t* registers, size_t count, LiveReading& readi
 
 bool decodeStatusBlock(const uint16_t* registers, size_t count, LiveReading& reading) {
   if (!registers || count < kStatusRegisterCount) return false;
-  for (size_t index = 0; index < kStatusRegisterCount; ++index) reading.statusRegs[index] = registers[index];
   reading.statusOk = true;
   reading.pvPowerW = clampPositivePowerW(registers[kPvPower]);
   reading.pvChargePowerW = clampPositivePowerW(registers[kPvChargePower]);

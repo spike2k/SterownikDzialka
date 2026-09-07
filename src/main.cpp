@@ -50,11 +50,21 @@ void setup() {
   JkBmsBleDriver::Config jkConfig;
   jkConfig.mac = settings.values.jkBmsMac;
   jkConfig.verbose = settings.values.debugJk;
-  jkBms.begin(jkConfig);
   anenji.begin(settings);
   pylontech.begin(settings);
   busMonitor.begin(settings, jkBms, anenji, pylontech);
   network.begin(relays, settings);
+  if (settings.values.mqttHost[0]) {
+    const uint32_t deadline = millis() + 30000;
+    while (!network.mqttConnected() && millis() < deadline) {
+      esp_task_wdt_reset();
+      network.tick(telemetry);
+      delay(20);
+    }
+    Serial.printf("MQTT %s heap=%u maxblock=%u\n", network.mqttConnected() ? "OK" : "oczekuje",
+                  ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+  }
+  jkBms.begin(jkConfig);
   webPanel.begin(telemetry, relays, network, settings, inputs);
 }
 
@@ -80,7 +90,6 @@ void loop() {
     telemetry.batterySoc = batteryData.socPercent;
     telemetry.batteryVoltageV = batteryData.packVoltageV;
     telemetry.batteryCurrentA = batteryData.currentA;
-    telemetry.cellVoltageV = batteryData.cellVoltageV;
     telemetry.cellCount = batteryData.cellCount;
     telemetry.updatedAtMs = batteryData.lastUpdateMs;
   }

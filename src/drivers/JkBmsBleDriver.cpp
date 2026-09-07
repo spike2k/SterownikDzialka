@@ -1,15 +1,9 @@
 #include "drivers/JkBmsBleDriver.h"
 
-#include <BLEAdvertisedDevice.h>
-#include <BLEClient.h>
-#include <BLEDevice.h>
-#include <BLERemoteCharacteristic.h>
-#include <BLERemoteService.h>
-#include <BLEScan.h>
+#include <NimBLEDevice.h>
 #include <algorithm>
 #include <cctype>
 #include <cstring>
-#include <map>
 #include <string>
 
 #include "drivers/JkBmsProtocol.h"
@@ -25,10 +19,8 @@ constexpr uint32_t kDeviceInfoRetryMs = 1500;
 constexpr uint32_t kCellInfoRetryMs = 2500;
 constexpr uint32_t kLogIntervalMs = 15000;
 
-bool uuidEquals16(BLEUUID uuid, uint16_t shortUuid) {
-  BLEUUID wanted(shortUuid);
-  if (uuid.equals(wanted)) return true;
-  return uuid.toString() == wanted.toString();
+bool uuidEquals16(const NimBLEUUID& uuid, uint16_t shortUuid) {
+  return uuid.equals(NimBLEUUID(shortUuid));
 }
 
 bool isKnownJkMacPrefix(const std::string& address) {
@@ -60,7 +52,7 @@ bool validMacText(const char* value) {
 }
 }  // namespace
 
-class JkBmsBleDriver::Impl : public BLEAdvertisedDeviceCallbacks, public BLEClientCallbacks {
+class JkBmsBleDriver::Impl : public NimBLEAdvertisedDeviceCallbacks, public NimBLEClientCallbacks {
  public:
   void begin(const Config& config) {
     verbose_ = config.verbose;
@@ -70,8 +62,9 @@ class JkBmsBleDriver::Impl : public BLEAdvertisedDeviceCallbacks, public BLEClie
       std::snprintf(targetMac_, sizeof(targetMac_), "%s", config.mac);
       for (char* c = targetMac_; *c; ++c) *c = static_cast<char>(std::tolower(static_cast<unsigned char>(*c)));
     }
-    BLEDevice::init("SterownikDzialka-JK");
-    scan_ = BLEDevice::getScan();
+    NimBLEDevice::init("SterownikDzialka-JK");
+    NimBLEDevice::setMTU(247);
+    scan_ = NimBLEDevice::getScan();
     scan_->setActiveScan(true);
     scan_->setInterval(160);
     scan_->setWindow(80);
@@ -96,7 +89,7 @@ class JkBmsBleDriver::Impl : public BLEAdvertisedDeviceCallbacks, public BLEClie
     if (connectRequested_ && !connecting_) {
       connectRequested_ = false;
       connecting_ = true;
-      if (xTaskCreate(connectTaskThunk, "jk-ble-connect", 8192, this, 1, nullptr) != pdPASS) {
+      if (xTaskCreate(connectTaskThunk, "jk-ble-connect", 4096, this, 1, nullptr) != pdPASS) {
         connecting_ = false;
         Serial.println("JK BLE: nie mozna uruchomic zadania laczenia");
       }
@@ -123,17 +116,18 @@ class JkBmsBleDriver::Impl : public BLEAdvertisedDeviceCallbacks, public BLEClie
   uint32_t validFrames() const { return validFrames_; }
   uint32_t invalidFrames() const { return invalidFrames_; }
 
-  void onResult(BLEAdvertisedDevice device) override {
-    const std::string address = device.getAddress().toString();
-    const std::string name = device.haveName() ? device.getName() : std::string();
-    const bool ffe0 = device.haveServiceUUID() && device.isAdvertisingService(BLEUUID(kServiceUuid));
+  void onResult(NimBLEAdvertisedDevice* device) override {
+    if (!device) return;
+    const std::string address = device->getAddress().toString();
+    const std::string name = device->haveName() ? device->getName() : std::string();
+    const bool ffe0 = device->haveServiceUUID() && device->isAdvertisingService(NimBLEUUID(kServiceUuid));
     const bool jk = JkBmsBleDriver::looksLikeJk(name.c_str(), ffe0) || isKnownJkMacPrefix(address);
     Serial.printf("BLE  name=%s  MAC=%s  RSSI=%d%s\n", name.empty() ? "(brak)" : name.c_str(),
-                  address.c_str(), device.getRSSI(), jk ? "  [JK-BMS?]" : "");
+                  address.c_str(), device->getRSSI(), jk ? "  [JK-BMS?]" : "");
     const bool selected = targetMac_[0] ? strcasecmp(targetMac_, address.c_str()) == 0 : jk;
     if (!selected || connecting_ || connected_ || connectRequested_) return;
     std::snprintf(candidateMac_, sizeof(candidateMac_), "%s", address.c_str());
-    candidateAddressType_ = device.getAddressType();
+    candidateAddress_ = device->getAddress();
     connectRequested_ = true;
     scanning_ = false;
     if (scan_) {
@@ -142,9 +136,9 @@ class JkBmsBleDriver::Impl : public BLEAdvertisedDeviceCallbacks, public BLEClie
     }
   }
 
-  void onConnect(BLEClient*) override {}
+  void onConnect(NimBLEClient*) override {}
 
-  void onDisconnect(BLEClient*) override {
+  void onDisconnect(NimBLEClient*) override {
     connected_ = false;
     connecting_ = false;
     scanning_ = false;
@@ -155,7 +149,7 @@ class JkBmsBleDriver::Impl : public BLEAdvertisedDeviceCallbacks, public BLEClie
   }
 
  private:
-  static void scanCompleteThunk(BLEScanResults) {
+  static void scanCompleteThunk(NimBLEScanResults) {
     if (active_) {
       active_->scanning_ = false;
       if (active_->scan_) active_->scan_->clearResults();
@@ -192,33 +186,30 @@ class JkBmsBleDriver::Impl : public BLEAdvertisedDeviceCallbacks, public BLEClie
     notifyCharacteristic_ = nullptr;
     Serial.printf("JK BLE: laczenie z %s...\n", candidateMac_);
     if (!client_) {
-      client_ = BLEDevice::createClient();
+      client_ = NimBLEDevice::createClient();
       client_->setClientCallbacks(this);
     }
-    if (!client_->connect(BLEAddress(candidateMac_), candidateAddressType_)) {
+    if (!client_->connect(candidateAddress_)) {
       abortConnect("JK BLE: polaczenie nieudane");
       return;
     }
-    client_->setMTU(517);
-    delay(200);
-    // getServices() w dumpie niszczy wczesniej pobrane BLERemoteService — zrzut przed getService(FFE0).
+    delay(120);
     if (verbose_ && !dumpedServices_) {
       dumpServices();
       dumpedServices_ = true;
     }
-    BLERemoteService* service = client_->getService(BLEUUID(kServiceUuid));
+    NimBLERemoteService* service = client_->getService(NimBLEUUID(kServiceUuid));
     if (!service) {
       abortConnect("JK BLE: brak service FFE0");
       return;
     }
-    auto* chars = service->getCharacteristicsByHandle();
+    auto* chars = service->getCharacteristics(true);
     if (!chars || chars->empty()) {
       abortConnect("JK BLE: service FFE0 bez charakterystyk");
       return;
     }
-    BLERemoteCharacteristic* ffe2Write = nullptr;
-    for (const auto& entry : *chars) {
-      BLERemoteCharacteristic* characteristic = entry.second;
+    NimBLERemoteCharacteristic* ffe2Write = nullptr;
+    for (NimBLERemoteCharacteristic* characteristic : *chars) {
       const bool canWrite = characteristic->canWriteNoResponse() || characteristic->canWrite();
       const bool canNotify = characteristic->canNotify() || characteristic->canIndicate();
       if (uuidEquals16(characteristic->getUUID(), kNotifyUuid)) {
@@ -235,8 +226,9 @@ class JkBmsBleDriver::Impl : public BLEAdvertisedDeviceCallbacks, public BLEClie
     }
     Serial.printf("JK BLE: write handle=0x%04X notify handle=0x%04X\n", writeCharacteristic_->getHandle(),
                   notifyCharacteristic_->getHandle());
-    notifyCharacteristic_->registerForNotify(
-        [this](BLERemoteCharacteristic*, uint8_t* data, size_t length, bool) { onNotify(data, length); });
+    notifyCharacteristic_->subscribe(
+        true, [this](NimBLERemoteCharacteristic*, uint8_t* data, size_t length, bool) { onNotify(data, length); },
+        false);
     std::snprintf(connectedMac_, sizeof(connectedMac_), "%s", candidateMac_);
     connected_ = true;
     connecting_ = false;
@@ -257,14 +249,14 @@ class JkBmsBleDriver::Impl : public BLEAdvertisedDeviceCallbacks, public BLEClie
   }
 
   void dumpServices() {
-    auto* services = client_->getServices();
+    auto* services = client_->getServices(true);
     Serial.println("BLE SERVICES / CHARACTERISTICS:");
-    for (const auto& serviceEntry : *services) {
-      BLERemoteService* service = serviceEntry.second;
+    if (!services) return;
+    for (NimBLERemoteService* service : *services) {
       Serial.printf("  SERVICE %s\n", service->getUUID().toString().c_str());
-      auto* chars = service->getCharacteristicsByHandle();
-      for (const auto& charEntry : *chars) {
-        BLERemoteCharacteristic* chr = charEntry.second;
+      auto* chars = service->getCharacteristics(true);
+      if (!chars) continue;
+      for (NimBLERemoteCharacteristic* chr : *chars) {
         Serial.printf("    CHAR %s handle=0x%04X R=%d W=%d WNR=%d N=%d I=%d\n",
                       chr->getUUID().toString().c_str(), chr->getHandle(), chr->canRead(), chr->canWrite(),
                       chr->canWriteNoResponse(), chr->canNotify(), chr->canIndicate());
@@ -276,7 +268,7 @@ class JkBmsBleDriver::Impl : public BLEAdvertisedDeviceCallbacks, public BLEClie
     if (!connected_ || !writeCharacteristic_) return;
     // ESPHome zostawia bajt 16 na 0; niezerowy licznik na 0x96 daje ACK C8, ale bez strumienia 0x02.
     const auto frame = JkBmsProtocol::buildReadCommand(command, 0);
-    writeCharacteristic_->writeValue(const_cast<uint8_t*>(frame.data()), frame.size(), false);
+    writeCharacteristic_->writeValue(frame.data(), frame.size(), false);
     lastRequestMs_ = millis();
     if (verbose_) {
       if (command == 0x97) printHex("JK TX DEVICE INFO", frame.data(), frame.size());
@@ -370,10 +362,10 @@ class JkBmsBleDriver::Impl : public BLEAdvertisedDeviceCallbacks, public BLEClie
   }
 
   inline static Impl* active_ = nullptr;
-  BLEScan* scan_ = nullptr;
-  BLEClient* client_ = nullptr;
-  BLERemoteCharacteristic* writeCharacteristic_ = nullptr;
-  BLERemoteCharacteristic* notifyCharacteristic_ = nullptr;
+  NimBLEScan* scan_ = nullptr;
+  NimBLEClient* client_ = nullptr;
+  NimBLERemoteCharacteristic* writeCharacteristic_ = nullptr;
+  NimBLERemoteCharacteristic* notifyCharacteristic_ = nullptr;
   portMUX_TYPE dataMux_ = portMUX_INITIALIZER_UNLOCKED;
   BatteryData battery_{};
   BatteryProtocol protocolHint_ = BatteryProtocol::Unknown;
@@ -393,7 +385,7 @@ class JkBmsBleDriver::Impl : public BLEAdvertisedDeviceCallbacks, public BLEClie
   char model_[17]{};
   char hardware_[9]{};
   char software_[9]{};
-  esp_ble_addr_type_t candidateAddressType_ = BLE_ADDR_TYPE_PUBLIC;
+  NimBLEAddress candidateAddress_{};
   uint8_t frame_[JkBmsProtocol::MaxFrameSize]{};
   size_t assemblerLength_ = 0;
   size_t headerMatch_ = 0;

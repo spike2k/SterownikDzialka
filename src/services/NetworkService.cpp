@@ -36,7 +36,7 @@ void NetworkService::begin(RelayController& relays, Settings& settings) {
   mqtt_.setCallback([this](char* topic, uint8_t* payload, unsigned int length) {
     onMqtt(topic, payload, length);
   });
-  mqtt_.setBufferSize(4096);
+  mqtt_.setBufferSize(1536);
   connectWifi();
 }
 
@@ -164,12 +164,13 @@ void NetworkService::connectMqtt() {
 
   const char* username = settings_->values.mqttUser[0] != '\0' ? settings_->values.mqttUser : nullptr;
   const char* password = username ? settings_->values.mqttPassword : nullptr;
+  Serial.printf("MQTT TLS try heap=%u maxblock=%u\n", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
   const bool connected = mqtt_.connect(clientId, username, password, Config::mqttStatusTopic, 1, true, kOffline, true);
   if (!connected) {
     char tlsError[128] = {};
     const int tlsErrorCode = mqttTlsClient_.lastError(tlsError, sizeof(tlsError));
-    Serial.printf("MQTT connection error %d; TLS %d: %s\n", mqtt_.state(), tlsErrorCode,
-                  tlsErrorCode ? tlsError : "no TLS error reported");
+    Serial.printf("MQTT connection error %d; TLS %d: %s (heap=%u maxblock=%u)\n", mqtt_.state(), tlsErrorCode,
+                  tlsErrorCode ? tlsError : "no TLS error reported", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
     return;
   }
 

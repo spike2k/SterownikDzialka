@@ -4,15 +4,6 @@
 #include "drivers/AnenjiProtocol.h"
 
 namespace {
-void appendU16Array(String& json, const uint16_t* values, size_t count) {
-  json += '[';
-  for (size_t index = 0; index < count; ++index) {
-    if (index) json += ',';
-    json += String(values[index]);
-  }
-  json += ']';
-}
-
 void appendFloatArray(String& json, const float* values, size_t count, unsigned int decimals) {
   json += '[';
   for (size_t index = 0; index < count; ++index) {
@@ -20,18 +11,6 @@ void appendFloatArray(String& json, const float* values, size_t count, unsigned 
     json += String(values[index], decimals);
   }
   json += ']';
-}
-
-void formatRuntime(uint32_t seconds, char* out, size_t outSize) {
-  const uint32_t days = seconds / 86400U;
-  seconds %= 86400U;
-  const uint32_t hours = seconds / 3600U;
-  seconds %= 3600U;
-  const uint32_t minutes = seconds / 60U;
-  seconds %= 60U;
-  snprintf(out, outSize, "%lud %02lu:%02lu:%02lu", static_cast<unsigned long>(days),
-           static_cast<unsigned long>(hours), static_cast<unsigned long>(minutes),
-           static_cast<unsigned long>(seconds));
 }
 }
 
@@ -90,10 +69,6 @@ void appendInverterJson(String& json, const Telemetry& telemetry) {
   json += ",\"inverterC\":" + String(inv.inverterTemperatureC, 0);
   json += ",\"statusOk\":";
   json += inv.statusOk ? "true" : "false";
-  json += ",\"liveRegs\":";
-  appendU16Array(json, inv.liveRegs, AnenjiProtocol::kLiveRegisterCount);
-  json += ",\"statusRegs\":";
-  appendU16Array(json, inv.statusRegs, AnenjiProtocol::kStatusRegisterCount);
   json += '}';
 }
 
@@ -122,9 +97,6 @@ void appendBmsJson(String& json, const Telemetry& telemetry) {
   json += ",\"cycles\":" + String(bms.cycleCount);
   json += ",\"cycleAh\":" + String(bms.cycleCapacityAh, 3);
   json += ",\"runtimeS\":" + String(bms.runtimeSeconds);
-  char runtime[24];
-  formatRuntime(bms.runtimeSeconds, runtime, sizeof(runtime));
-  json += ",\"runtime\":" + jsonEscape(runtime);
   json += ",\"mosC\":" + String(bms.mosTemperatureC, 1);
   json += ",\"tempsC\":";
   appendFloatArray(json, bms.temperaturesC.data(), bms.temperatureCount, 1);
@@ -152,14 +124,12 @@ void appendBmsJson(String& json, const Telemetry& telemetry) {
   json += ",\"cellMax\":" + String(bms.maxCellNumber);
   json += ",\"cells\":";
   appendFloatArray(json, bms.cellVoltageV.data(), bms.cellCount, 3);
-  json += ",\"resistances\":";
-  appendFloatArray(json, bms.cellResistanceOhm.data(), bms.cellCount, 3);
   json += '}';
 }
 
 String mqttTelemetryJson(const Telemetry& telemetry) {
   String json;
-  json.reserve(2800);
+  json.reserve(1400);
   json += "{\"pvW\":" + String(telemetry.pvPowerW, 0);
   json += ",\"loadW\":" + String(telemetry.loadPowerW, 0);
   json += ",\"soc\":" + String(telemetry.batterySoc, 1);

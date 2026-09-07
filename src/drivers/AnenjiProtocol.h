@@ -93,8 +93,6 @@ struct LiveReading {
   float inverterTemperatureC = 0;
   uint16_t batterySocPercent = 0;
   float batteryCurrent2A = 0;
-  uint16_t liveRegs[kLiveRegisterCount]{};
-  uint16_t statusRegs[kStatusRegisterCount]{};
   bool statusOk = false;
 };
 

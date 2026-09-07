@@ -337,14 +337,10 @@ String WebPanel::stateJson() const {
     else if (telemetry_->batteryCurrentA < -Config::chargeIdleAmps) charge = "discharge";
     else charge = "idle";
     if (telemetry_->batteryCurrentA < -Config::chargeIdleAmps) batteryCoverW = -batteryW;
-    if (telemetry_->cellCount > 0) {
-      cellMinV = cellMaxV = telemetry_->cellVoltageV[0];
-      for (size_t index = 1; index < telemetry_->cellCount; ++index) {
-        const float volts = telemetry_->cellVoltageV[index];
-        if (volts < cellMinV) cellMinV = volts;
-        if (volts > cellMaxV) cellMaxV = volts;
-      }
-      cellDriftMv = (cellMaxV - cellMinV) * 1000.0f;
+    if (telemetry_->bms.cellCount > 0) {
+      cellMinV = telemetry_->bms.minCellVoltageV;
+      cellMaxV = telemetry_->bms.maxCellVoltageV;
+      cellDriftMv = telemetry_->bms.deltaCellVoltageV * 1000.0f;
       cellAlarm = cellDriftMv >= settings_->values.cellDriftAlarmMv;
     }
   }
@@ -354,7 +350,7 @@ String WebPanel::stateJson() const {
   }
 
   String json;
-  json.reserve(5200);
+  json.reserve(2800);
   json += "{\"pvW\":" + String(telemetry_->pvPowerW, 1);
   json += ",\"loadW\":" + String(telemetry_->loadPowerW, 1);
   json += ",\"soc\":" + String(telemetry_->batterySoc, 1);
@@ -382,10 +378,10 @@ String WebPanel::stateJson() const {
   json += ",\"cellDriftAlarmMv\":" + String(settings_->values.cellDriftAlarmMv);
   json += ",\"cellAlarm\":" + String(cellAlarm ? "true" : "false");
   json += ",\"cells\":[";
-  const size_t cellCount = telemetry_->jkOnline ? telemetry_->cellCount : 0;
+  const size_t cellCount = telemetry_->jkOnline ? telemetry_->bms.cellCount : 0;
   for (size_t index = 0; index < cellCount; ++index) {
     if (index) json += ',';
-    json += String(telemetry_->cellVoltageV[index], 3);
+    json += String(telemetry_->bms.cellVoltageV[index], 3);
   }
   json += "],\"loads\":[";
   for (size_t index = 0; index < Config::loadCount; ++index) {

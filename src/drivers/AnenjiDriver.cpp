@@ -42,7 +42,7 @@ void AnenjiDriver::openSerial(bool invert) {
   invert_ = invert;
   serial_.end();
   delay(50);
-  serial_.setRxBufferSize(512);
+  serial_.setRxBufferSize(256);
   serial_.begin(Config::anenjiBaud, SERIAL_8N1, settings_->values.anenjiRxPin,
                 settings_->values.anenjiTxPin, invert);
   delay(80);

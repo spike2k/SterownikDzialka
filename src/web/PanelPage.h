@@ -199,17 +199,13 @@ input,select{background:#0b1420;border:1px solid var(--line);border-radius:10px;
       <h2 style="margin:0">Statystyki dla nerdów</h2>
       <button class="act" onclick="showNerd(false)">Dashboard</button>
     </div>
-    <p class="help">Pełny zrzut tego, co sterownik zbiera z falownika (Modbus 200–221 i 223–235) i JK-BMS (ramka 0x02 + info 0x03). Te same obiekty <code>inverter</code> i <code>bms</code> idą na MQTT w <code>ems/sterownik-dzialka/state</code>.</p>
+    <p class="help">Zdekodowane odczyty falownika (live 200–221 i status 223–235) oraz JK-BMS. Te same obiekty <code>inverter</code> i <code>bms</code> idą na MQTT.</p>
   </article>
   <section class="section card">
     <h2>Falownik Anenji / SMG-II</h2>
     <div id="nerdInvEmpty" class="empty"><svg width="22" height="22"><use href="#i-warn"/></svg>Brak połączenia z falownikiem</div>
     <div id="nerdInv" class="hidden">
       <div class="kv" id="nerdInvKv"></div>
-      <h2 style="margin-top:16px">Rejestry live 200–221</h2>
-      <div class="regs" id="nerdLiveRegs"></div>
-      <h2 style="margin-top:16px">Rejestry status 223–235</h2>
-      <div class="regs" id="nerdStatusRegs"></div>
     </div>
   </section>
   <section class="section card">
@@ -218,13 +214,9 @@ input,select{background:#0b1420;border:1px solid var(--line);border-radius:10px;
     <div id="nerdBms" class="hidden">
       <div class="mos" id="nerdMos"></div>
       <div class="kv" id="nerdBmsKv"></div>
-      <h2 style="margin-top:16px">Cele i rezystancje</h2>
+      <h2 style="margin-top:16px">Cele</h2>
       <div class="cells" id="nerdCells"></div>
     </div>
-  </section>
-  <section class="section card">
-    <h2>Surowy JSON (inverter + bms)</h2>
-    <pre class="raw" id="nerdJson"></pre>
   </section>
 </section>
 
@@ -429,10 +421,6 @@ async function refresh(){
 function n(v,d){return v==null||!isFinite(Number(v))?'—':Number(v).toFixed(d)}
 function kv(label,value){return `<div class="kv-item"><span>${esc(label)}</span><b>${value}</b></div>`}
 function pill(label,on){return `<div class="pill ${on?'ok':'warn'}">${esc(label)} ${on?'ON':'OFF'}</div>`}
-function regsHtml(start,arr){
-  if(!arr||!arr.length) return '—';
-  return arr.map((v,i)=>`<span><i>${start+i}</i>${v}</span>`).join('');
-}
 function renderNerd(s){
   const inv=s.inverter||{};
   const bms=s.bms||{};
@@ -458,8 +446,6 @@ function renderNerd(s){
       kv('Temp. falownika',n(inv.inverterC,0)+' °C'),
       kv('Blok status',inv.statusOk?'OK':'brak')
     ].join('');
-    q('nerdLiveRegs').innerHTML=regsHtml(200,inv.liveRegs);
-    q('nerdStatusRegs').innerHTML=regsHtml(223,inv.statusRegs);
   }
   q('nerdBmsEmpty').classList.toggle('hidden',!!bms.online);
   q('nerdBms').classList.toggle('hidden',!bms.online);
@@ -484,7 +470,7 @@ function renderNerd(s){
       kv('SOC / SOH',n(bms.soc,0)+' % / '+n(bms.soh,0)+' %'),
       kv('Pojemność',n(bms.remainingAh,2)+' / '+n(bms.fullAh,2)+' Ah'),
       kv('Cykle',n(bms.cycles,0)+' · '+n(bms.cycleAh,1)+' Ah'),
-      kv('Runtime',esc(bms.runtime||'—')),
+      kv('Runtime',n(bms.runtimeS,0)+' s'),
       kv('Temp. MOS',n(bms.mosC,1)+' °C'),
       kv('Czujniki',esc(temps)),
       kv('Prąd balansu',n(bms.balanceA,3)+' A · status '+n(bms.balancerStatus,0)),
@@ -493,19 +479,13 @@ function renderNerd(s){
       kv('Δ / średnia',n(bms.cellDeltaV,3)+' V · '+n(bms.cellAvgV,3)+' V')
     ]).join('');
     const cells=bms.cells||[];
-    const r=bms.resistances||[];
-    q('nerdCells').innerHTML=cells.map((v,i)=>{
-      const ohm=r[i];
-      const ohmTxt=ohm>0?('<small>'+n(ohm,3)+' Ω</small>'):'';
-      return `<div class="cell">C${i+1}<b>${n(v,3)} V</b>${ohmTxt}</div>`;
-    }).join('')||'—';
+    q('nerdCells').innerHTML=cells.map((v,i)=>`<div class="cell">C${i+1}<b>${n(v,3)} V</b></div>`).join('')||'—';
   } else {
     q('nerdMos').innerHTML='';
     q('nerdBmsKv').innerHTML=ident.join('');
     q('nerdBmsEmpty').classList.toggle('hidden',false);
     q('nerdBms').classList.toggle('hidden',false);
   }
-  try{q('nerdJson').textContent=JSON.stringify({inverter:inv,bms:bms},null,2)}catch(e){q('nerdJson').textContent='(błąd JSON)'}
 }
 refresh();setInterval(refresh,2000);
 </script>
