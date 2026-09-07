@@ -166,8 +166,10 @@ void NetworkService::connectMqtt() {
   const char* password = username ? settings_->values.mqttPassword : nullptr;
   const bool connected = mqtt_.connect(clientId, username, password, Config::mqttStatusTopic, 1, true, kOffline, true);
   if (!connected) {
-    Serial.print("MQTT TLS error ");
-    Serial.println(mqtt_.state());
+    char tlsError[128] = {};
+    const int tlsErrorCode = mqttTlsClient_.lastError(tlsError, sizeof(tlsError));
+    Serial.printf("MQTT connection error %d; TLS %d: %s\n", mqtt_.state(), tlsErrorCode,
+                  tlsErrorCode ? tlsError : "no TLS error reported");
     return;
   }
 
