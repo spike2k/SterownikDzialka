@@ -3,7 +3,6 @@
 #include <HTTPClient.h>
 #include <Update.h>
 #include <WiFiClientSecure.h>
-#include <esp_task_wdt.h>
 #include <mbedtls/sha256.h>
 
 #include "AppConfig.h"
@@ -26,6 +25,10 @@ String sha256Hex(const unsigned char hash[32]) {
 }
 
 bool OtaUpdater::install(const char* expectedSha256, String& error) {
+  return installFrom(Config::otaFirmwareUrl, expectedSha256, error);
+}
+
+bool OtaUpdater::installFrom(const char* firmwareUrl, const char* expectedSha256, String& error) {
   WiFiClientSecure tlsClient;
   tlsClient.setCACert(TlsCertificates::letsEncryptRootX1);
   tlsClient.setHandshakeTimeout(15);
@@ -33,7 +36,7 @@ bool OtaUpdater::install(const char* expectedSha256, String& error) {
   HTTPClient request;
   request.setConnectTimeout(kDownloadTimeoutMs);
   request.setTimeout(kDownloadTimeoutMs);
-  if (!request.begin(tlsClient, Config::otaFirmwareUrl)) {
+  if (!request.begin(tlsClient, firmwareUrl)) {
     error = "nie mozna otworzyc adresu HTTPS";
     return false;
   }
@@ -74,7 +77,6 @@ bool OtaUpdater::install(const char* expectedSha256, String& error) {
   bool downloadOk = true;
 
   while (totalWritten < static_cast<size_t>(firmwareSize)) {
-    esp_task_wdt_reset();
     const size_t available = stream->available();
     if (available == 0) {
       if (millis() - lastDataMs >= kDownloadTimeoutMs) {

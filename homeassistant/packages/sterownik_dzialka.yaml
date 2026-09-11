@@ -1,0 +1,476 @@
+# Pakiet Home Assistant dla Sterownika Dzialka EMS.
+# W configuration.yaml dodaj:
+# homeassistant:
+#   packages: !include_dir_named packages
+
+mqtt:
+  binary_sensor:
+    - name: "Sterownik działka online"
+      default_entity_id: binary_sensor.dzialka_sterownik_online
+      unique_id: dzialka_sterownik_online
+      state_topic: "ems/sterownik-dzialka/status"
+      payload_on: "online"
+      payload_off: "offline"
+      device_class: connectivity
+      device: &dzialka_device
+        identifiers:
+          - sterownik-dzialka
+        name: "Sterownik działka EMS"
+        manufacturer: "DIY"
+        model: "ESP32 EMS"
+        suggested_area: "Działka"
+
+    - name: "Falownik online"
+      default_entity_id: binary_sensor.dzialka_falownik_online
+      unique_id: dzialka_falownik_online
+      state_topic: "ems/sterownik-dzialka/state"
+      value_template: "{{ 'ON' if value_json.inverter.online else 'OFF' }}"
+      payload_on: "ON"
+      payload_off: "OFF"
+      device_class: connectivity
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    - name: "BMS online"
+      default_entity_id: binary_sensor.dzialka_bms_online
+      unique_id: dzialka_bms_online
+      state_topic: "ems/sterownik-dzialka/state"
+      value_template: "{{ 'ON' if value_json.bms.online else 'OFF' }}"
+      payload_on: "ON"
+      payload_off: "OFF"
+      device_class: connectivity
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    - name: "Alarm BMS"
+      default_entity_id: binary_sensor.dzialka_alarm_bms
+      unique_id: dzialka_alarm_bms
+      state_topic: "ems/sterownik-dzialka/state"
+      value_template: "{{ 'ON' if value_json.bms.alarms | int(0) > 0 else 'OFF' }}"
+      payload_on: "ON"
+      payload_off: "OFF"
+      device_class: problem
+      availability_topic: "ems/sterownik-dzialka/status"
+      json_attributes_topic: "ems/sterownik-dzialka/state"
+      json_attributes_template: "{{ {'kod': value_json.bms.alarmsHex} | tojson }}"
+      device: *dzialka_device
+
+    - name: "BMS ładowanie MOS"
+      default_entity_id: binary_sensor.dzialka_bms_charge_mos
+      unique_id: dzialka_bms_charge_mos
+      state_topic: "ems/sterownik-dzialka/state"
+      value_template: "{{ 'ON' if value_json.bms.chargeMos else 'OFF' }}"
+      payload_on: "ON"
+      payload_off: "OFF"
+      icon: mdi:battery-arrow-up
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    - name: "BMS rozładowanie MOS"
+      default_entity_id: binary_sensor.dzialka_bms_discharge_mos
+      unique_id: dzialka_bms_discharge_mos
+      state_topic: "ems/sterownik-dzialka/state"
+      value_template: "{{ 'ON' if value_json.bms.dischargeMos else 'OFF' }}"
+      payload_on: "ON"
+      payload_off: "OFF"
+      icon: mdi:battery-arrow-down
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    - name: "BMS balansowanie"
+      default_entity_id: binary_sensor.dzialka_bms_balancing
+      unique_id: dzialka_bms_balancing
+      state_topic: "ems/sterownik-dzialka/state"
+      value_template: "{{ 'ON' if value_json.bms.balancing else 'OFF' }}"
+      payload_on: "ON"
+      payload_off: "OFF"
+      icon: mdi:scale-balance
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+  sensor:
+    - name: "Działka moc PV"
+      default_entity_id: sensor.dzialka_moc_pv
+      unique_id: dzialka_moc_pv
+      state_topic: "ems/sterownik-dzialka/state"
+      value_template: "{{ value_json.pvW | float(0) }}"
+      unit_of_measurement: "W"
+      device_class: power
+      state_class: measurement
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    - name: "Działka moc odbiorników"
+      default_entity_id: sensor.dzialka_moc_odbiornikow
+      unique_id: dzialka_moc_odbiornikow
+      state_topic: "ems/sterownik-dzialka/state"
+      value_template: "{{ value_json.loadW | float(0) }}"
+      unit_of_measurement: "W"
+      device_class: power
+      state_class: measurement
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    - name: "Działka SOC baterii"
+      default_entity_id: sensor.dzialka_soc_baterii
+      unique_id: dzialka_soc_baterii
+      state_topic: "ems/sterownik-dzialka/state"
+      value_template: "{{ value_json.soc | float(0) }}"
+      unit_of_measurement: "%"
+      device_class: battery
+      state_class: measurement
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    - name: "Działka napięcie baterii"
+      default_entity_id: sensor.dzialka_napiecie_baterii
+      unique_id: dzialka_napiecie_baterii
+      state_topic: "ems/sterownik-dzialka/state"
+      value_template: "{{ value_json.batteryV | float(0) }}"
+      unit_of_measurement: "V"
+      device_class: voltage
+      state_class: measurement
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    - name: "Działka prąd baterii"
+      default_entity_id: sensor.dzialka_prad_baterii
+      unique_id: dzialka_prad_baterii
+      state_topic: "ems/sterownik-dzialka/state"
+      value_template: "{{ value_json.batteryA | float(0) }}"
+      unit_of_measurement: "A"
+      device_class: current
+      state_class: measurement
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    - name: "Działka moc baterii"
+      default_entity_id: sensor.dzialka_moc_baterii
+      unique_id: dzialka_moc_baterii
+      state_topic: "ems/sterownik-dzialka/state"
+      value_template: "{{ value_json.bms.powerW | float(0) }}"
+      unit_of_measurement: "W"
+      device_class: power
+      state_class: measurement
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    - name: "Działka pozostała pojemność"
+      default_entity_id: sensor.dzialka_pozostala_pojemnosc
+      unique_id: dzialka_pozostala_pojemnosc
+      state_topic: "ems/sterownik-dzialka/state"
+      value_template: "{{ value_json.bms.remainingAh | float(0) }}"
+      unit_of_measurement: "Ah"
+      state_class: measurement
+      icon: mdi:battery-high
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    - name: "Działka temperatura BMS"
+      default_entity_id: sensor.dzialka_temperatura_bms
+      unique_id: dzialka_temperatura_bms
+      state_topic: "ems/sterownik-dzialka/state"
+      value_template: "{{ value_json.bms.mosC | float(0) }}"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    - name: "Działka temperatura falownika"
+      default_entity_id: sensor.dzialka_temperatura_falownika
+      unique_id: dzialka_temperatura_falownika
+      state_topic: "ems/sterownik-dzialka/state"
+      value_template: "{{ value_json.inverter.inverterC | float(0) }}"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    - name: "Działka tryb falownika"
+      default_entity_id: sensor.dzialka_tryb_falownika
+      unique_id: dzialka_tryb_falownika
+      state_topic: "ems/sterownik-dzialka/state"
+      value_template: "{{ value_json.inverter.mode }}"
+      icon: mdi:power-settings
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    - name: "Działka napięcie wyjściowe"
+      default_entity_id: sensor.dzialka_napiecie_wyjsciowe
+      unique_id: dzialka_napiecie_wyjsciowe
+      state_topic: "ems/sterownik-dzialka/state"
+      value_template: "{{ value_json.inverter.outputV | float(0) }}"
+      unit_of_measurement: "V"
+      device_class: voltage
+      state_class: measurement
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    - name: "Działka obciążenie falownika"
+      default_entity_id: sensor.dzialka_obciazenie_falownika
+      unique_id: dzialka_obciazenie_falownika
+      state_topic: "ems/sterownik-dzialka/state"
+      value_template: "{{ value_json.inverter.loadPercent | int(0) }}"
+      unit_of_measurement: "%"
+      state_class: measurement
+      icon: mdi:gauge
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    - name: "Działka różnica ogniw"
+      default_entity_id: sensor.dzialka_roznica_ogniw
+      unique_id: dzialka_roznica_ogniw
+      state_topic: "ems/sterownik-dzialka/state"
+      value_template: "{{ (value_json.bms.cellDeltaV | float(0) * 1000) | round(0) }}"
+      unit_of_measurement: "mV"
+      state_class: measurement
+      icon: mdi:battery-sync
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    - name: "Działka cykle baterii"
+      default_entity_id: sensor.dzialka_cykle_baterii
+      unique_id: dzialka_cykle_baterii
+      state_topic: "ems/sterownik-dzialka/state"
+      value_template: "{{ value_json.bms.cycles | int(0) }}"
+      state_class: total_increasing
+      icon: mdi:battery-sync-outline
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    - name: "Działka ogniwo 1"
+      default_entity_id: sensor.dzialka_ogniwo_1
+      unique_id: dzialka_ogniwo_1
+      state_topic: "ems/sterownik-dzialka/state"
+      value_template: "{{ value_json.bms.cells[0] | float(0) }}"
+      unit_of_measurement: "V"
+      device_class: voltage
+      state_class: measurement
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    - name: "Działka ogniwo 2"
+      default_entity_id: sensor.dzialka_ogniwo_2
+      unique_id: dzialka_ogniwo_2
+      state_topic: "ems/sterownik-dzialka/state"
+      value_template: "{{ value_json.bms.cells[1] | float(0) }}"
+      unit_of_measurement: "V"
+      device_class: voltage
+      state_class: measurement
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    - name: "Działka ogniwo 3"
+      default_entity_id: sensor.dzialka_ogniwo_3
+      unique_id: dzialka_ogniwo_3
+      state_topic: "ems/sterownik-dzialka/state"
+      value_template: "{{ value_json.bms.cells[2] | float(0) }}"
+      unit_of_measurement: "V"
+      device_class: voltage
+      state_class: measurement
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    - name: "Działka ogniwo 4"
+      default_entity_id: sensor.dzialka_ogniwo_4
+      unique_id: dzialka_ogniwo_4
+      state_topic: "ems/sterownik-dzialka/state"
+      value_template: "{{ value_json.bms.cells[3] | float(0) }}"
+      unit_of_measurement: "V"
+      device_class: voltage
+      state_class: measurement
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    - name: "Działka ogniwo 5"
+      default_entity_id: sensor.dzialka_ogniwo_5
+      unique_id: dzialka_ogniwo_5
+      state_topic: "ems/sterownik-dzialka/state"
+      value_template: "{{ value_json.bms.cells[4] | float(0) }}"
+      unit_of_measurement: "V"
+      device_class: voltage
+      state_class: measurement
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    - name: "Działka ogniwo 6"
+      default_entity_id: sensor.dzialka_ogniwo_6
+      unique_id: dzialka_ogniwo_6
+      state_topic: "ems/sterownik-dzialka/state"
+      value_template: "{{ value_json.bms.cells[5] | float(0) }}"
+      unit_of_measurement: "V"
+      device_class: voltage
+      state_class: measurement
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    - name: "Działka ogniwo 7"
+      default_entity_id: sensor.dzialka_ogniwo_7
+      unique_id: dzialka_ogniwo_7
+      state_topic: "ems/sterownik-dzialka/state"
+      value_template: "{{ value_json.bms.cells[6] | float(0) }}"
+      unit_of_measurement: "V"
+      device_class: voltage
+      state_class: measurement
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    - name: "Działka ogniwo 8"
+      default_entity_id: sensor.dzialka_ogniwo_8
+      unique_id: dzialka_ogniwo_8
+      state_topic: "ems/sterownik-dzialka/state"
+      value_template: "{{ value_json.bms.cells[7] | float(0) }}"
+      unit_of_measurement: "V"
+      device_class: voltage
+      state_class: measurement
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+  select:
+    - name: "Działka tryb sterowania"
+      default_entity_id: select.dzialka_tryb_sterowania
+      unique_id: dzialka_tryb_sterowania
+      state_topic: "ems/sterownik-dzialka/mode/state"
+      command_topic: "ems/sterownik-dzialka/mode/set"
+      options:
+        - auto
+        - manual
+      optimistic: false
+      qos: 1
+      retain: false
+      availability_topic: "ems/sterownik-dzialka/status"
+      icon: mdi:state-machine
+      device: *dzialka_device
+
+  switch:
+    - name: "Działka przekaźnik 1"
+      default_entity_id: switch.dzialka_przekaznik_1
+      unique_id: dzialka_przekaznik_1
+      state_topic: "ems/sterownik-dzialka/relay/0/state"
+      command_topic: "ems/sterownik-dzialka/relay/0/set"
+      payload_on: "ON"
+      payload_off: "OFF"
+      optimistic: false
+      qos: 1
+      retain: false
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    - name: "Działka przekaźnik 2"
+      default_entity_id: switch.dzialka_przekaznik_2
+      unique_id: dzialka_przekaznik_2
+      state_topic: "ems/sterownik-dzialka/relay/1/state"
+      command_topic: "ems/sterownik-dzialka/relay/1/set"
+      payload_on: "ON"
+      payload_off: "OFF"
+      optimistic: false
+      qos: 1
+      retain: false
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    - name: "Działka przekaźnik 3"
+      default_entity_id: switch.dzialka_przekaznik_3
+      unique_id: dzialka_przekaznik_3
+      state_topic: "ems/sterownik-dzialka/relay/2/state"
+      command_topic: "ems/sterownik-dzialka/relay/2/set"
+      payload_on: "ON"
+      payload_off: "OFF"
+      optimistic: false
+      qos: 1
+      retain: false
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    - name: "Działka przekaźnik 4"
+      default_entity_id: switch.dzialka_przekaznik_4
+      unique_id: dzialka_przekaznik_4
+      state_topic: "ems/sterownik-dzialka/relay/3/state"
+      command_topic: "ems/sterownik-dzialka/relay/3/set"
+      payload_on: "ON"
+      payload_off: "OFF"
+      optimistic: false
+      qos: 1
+      retain: false
+      availability_topic: "ems/sterownik-dzialka/status"
+      device: *dzialka_device
+
+    # Wyjatek migracyjny: zainstalowany OpenBeken nadaje jeszcze natywne tematy.
+    # Po jego rekonfiguracji OTA zamien na stat/studnia/POWER, cmnd/studnia/POWER
+    # i tele/studnia/LWT, tak jak w kolejnych satelitach.
+    - name: "Działka studnia"
+      default_entity_id: switch.dzialka_studnia
+      unique_id: dzialka_studnia
+      state_topic: "studnia/0/get"
+      command_topic: "studnia/0/set"
+      payload_on: "1"
+      payload_off: "0"
+      optimistic: false
+      qos: 1
+      retain: false
+      availability_topic: "studnia/connected"
+      payload_available: "online"
+      payload_not_available: "offline"
+      icon: mdi:water-pump
+
+    - name: "Działka fontanna"
+      default_entity_id: switch.dzialka_fontanna
+      unique_id: dzialka_fontanna
+      state_topic: "stat/fontanna/POWER"
+      command_topic: "cmnd/fontanna/POWER"
+      payload_on: "ON"
+      payload_off: "OFF"
+      optimistic: false
+      qos: 1
+      retain: false
+      availability_topic: "tele/fontanna/LWT"
+      payload_available: "Online"
+      payload_not_available: "Offline"
+      icon: mdi:fountain
+
+    - name: "Działka bojler"
+      default_entity_id: switch.dzialka_bojler
+      unique_id: dzialka_bojler
+      state_topic: "stat/bojler/POWER"
+      command_topic: "cmnd/bojler/POWER"
+      payload_on: "ON"
+      payload_off: "OFF"
+      optimistic: false
+      qos: 1
+      retain: false
+      availability_topic: "tele/bojler/LWT"
+      payload_available: "Online"
+      payload_not_available: "Offline"
+      icon: mdi:water-boiler
+
+    - name: "Działka pompa"
+      default_entity_id: switch.dzialka_pompa
+      unique_id: dzialka_pompa
+      state_topic: "stat/pompa/POWER"
+      command_topic: "cmnd/pompa/POWER"
+      payload_on: "ON"
+      payload_off: "OFF"
+      optimistic: false
+      qos: 1
+      retain: false
+      availability_topic: "tele/pompa/LWT"
+      payload_available: "Online"
+      payload_not_available: "Offline"
+      icon: mdi:pump
+
+    - name: "Działka oświetlenie"
+      default_entity_id: switch.dzialka_oswietlenie
+      unique_id: dzialka_oswietlenie
+      state_topic: "stat/oswietlenie/POWER"
+      command_topic: "cmnd/oswietlenie/POWER"
+      payload_on: "ON"
+      payload_off: "OFF"
+      optimistic: false
+      qos: 1
+      retain: false
+      availability_topic: "tele/oswietlenie/LWT"
+      payload_available: "Online"
+      payload_not_available: "Offline"
+      icon: mdi:outdoor-lamp

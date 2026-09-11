@@ -13,6 +13,10 @@ void RelayController::reconfigure() {
     releasePin(armedPins_[index]);
     armedPins_[index] = -1;
     states_[index] = false;
+    reportedStates_[index] = false;
+    reportedStateValid_[index] = false;
+    remoteAvailable_[index] = false;
+    remoteAvailabilityValid_[index] = false;
     lastToggleMs_[index] = 0;
   }
   for (size_t index = 0; index < Config::loadCount; ++index) {
@@ -114,6 +118,35 @@ void RelayController::setMode(ControlMode mode) {
 
 ControlMode RelayController::mode() const { return mode_; }
 bool RelayController::state(size_t index) const { return index < Config::loadCount && states_[index]; }
+bool RelayController::confirmedState(size_t index) const {
+  if (index >= Config::loadCount) return false;
+  return reportedStateValid_[index] ? reportedStates_[index] : states_[index];
+}
+bool RelayController::confirmedStateKnown(size_t index) const {
+  if (index >= Config::loadCount) return false;
+  return armedPins_[index] >= 0 || reportedStateValid_[index];
+}
+bool RelayController::remoteAvailable(size_t index) const {
+  return index < Config::loadCount && remoteAvailable_[index];
+}
+bool RelayController::remoteAvailabilityKnown(size_t index) const {
+  return index < Config::loadCount && remoteAvailabilityValid_[index];
+}
+
+void RelayController::reportRemoteState(size_t index, bool enabled) {
+  if (index >= Config::loadCount || armedPins_[index] >= 0) return;
+  reportedStates_[index] = enabled;
+  reportedStateValid_[index] = true;
+  // W trybie recznym przycisk na urzadzeniu jest rownoprawnym sterowaniem.
+  // W automacie stan zadany pozostaje decyzja EMS i zostanie uzgodniony.
+  if (mode_ == ControlMode::Manual) states_[index] = enabled;
+}
+
+void RelayController::reportRemoteAvailability(size_t index, bool available) {
+  if (index >= Config::loadCount || armedPins_[index] >= 0) return;
+  remoteAvailable_[index] = available;
+  remoteAvailabilityValid_[index] = true;
+}
 int RelayController::pin(size_t index) const {
   if (!settings_ || index >= Config::loadCount) return -1;
   return settings_->values.loads[index].pin;
@@ -133,6 +166,8 @@ void RelayController::apply(size_t index, bool enabled) {
   states_[index] = enabled;
   const int gpio = armedPins_[index];
   if (gpio < 0 || !settings_) return;
+  reportedStates_[index] = enabled;
+  reportedStateValid_[index] = true;
   const bool pinLevel = settings_->values.relayActiveLow ? !enabled : enabled;
   digitalWrite(gpio, pinLevel ? HIGH : LOW);
 }

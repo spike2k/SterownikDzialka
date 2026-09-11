@@ -1,0 +1,334 @@
+title: Działka
+views:
+  - title: Działka
+    path: dzialka
+    icon: mdi:solar-power-variant
+    type: sections
+    max_columns: 2
+    dense_section_placement: false
+    header:
+      layout: responsive
+      badges_position: bottom
+      card:
+        type: markdown
+        content: |-
+          # 🌿 Działka
+          {% set ems = is_state('binary_sensor.dzialka_sterownik_online', 'on') %}
+          {% set pv = states('sensor.dzialka_moc_pv') | float(0) %}
+          {% set load = states('sensor.dzialka_moc_odbiornikow') | float(0) %}
+          {% set battery = states('sensor.dzialka_moc_baterii') | float(0) %}
+          {% set soc = states('sensor.dzialka_soc_baterii') | int(0) %}
+          {% set weather = states.weather | list | first %}
+          {% set descriptions = {'sunny':'słonecznie','clear-night':'bezchmurna noc','partlycloudy':'częściowe zachmurzenie','cloudy':'pochmurno','rainy':'pada deszcz','pouring':'mocno pada','snowy':'pada śnieg','snowy-rainy':'pada deszcz ze śniegiem','fog':'mgliście','windy':'wietrznie','windy-variant':'wietrznie','lightning':'burzowo','lightning-rainy':'burzowo i deszczowo','hail':'pada grad','exceptional':'nietypowa pogoda'} %}
+          {% if weather %}
+            **Dziś jest {{ descriptions.get(weather.state, weather.state) }}{% if state_attr(weather.entity_id, 'temperature') is not none %}, {{ state_attr(weather.entity_id, 'temperature') }}°C{% endif %}.**
+          {% else %}
+            **Brak encji pogody — pozostałe dane działają normalnie.**
+          {% endif %}
+
+          {{ '🟢' if ems else '🔴' }} EMS: **{{ 'aktywne' if ems else 'brak połączenia' }}** ·
+          {% if battery > 5 %}🔋 bateria **ładuje się**{% elif battery < -5 %}⚡ bateria **rozładowuje się**{% else %}🔋 bateria **jest w spoczynku**{% endif %}
+          ({{ soc }}%) · ☀️ PV **{{ pv | round(0) }} W** · 🏠 pobór **{{ load | round(0) }} W**
+
+    sections:
+      - type: grid
+        title: Energia teraz
+        background:
+          color: green
+          opacity: 8
+        cards:
+          - type: custom:power-flow-card-plus
+            title: Przepływ energii
+            clickable_entities: true
+            entities:
+              solar:
+                entity: sensor.dzialka_moc_pv
+                name: Fotowoltaika
+                icon: mdi:solar-panel-large
+                color: "#f9a825"
+                color_icon: true
+                color_value: true
+                display_zero: true
+              battery:
+                entity: sensor.dzialka_moc_baterii
+                state_of_charge: sensor.dzialka_soc_baterii
+                state_of_charge_decimals: 0
+                name: Bateria
+                color_circle: color_dynamically
+                color_icon: color_dynamically
+                color_state_of_charge_value: color_dynamically
+              home:
+                entity: sensor.dzialka_moc_odbiornikow
+                name: Odbiorniki
+                icon: mdi:home-lightning-bolt
+                override_state: true
+                color_icon: solar
+            display_zero_lines:
+              mode: transparency
+              transparency: 70
+            use_new_flow_rate_model: true
+            min_expected_power: 0.01
+            max_expected_power: 4000
+            min_flow_rate: 0.8
+            max_flow_rate: 6
+            kilo_threshold: 1000
+            grid_options:
+              columns: full
+          - type: custom:mushroom-template-card
+            entity: binary_sensor.dzialka_alarm_bms
+            primary: "{{ 'Alarm baterii' if is_state(entity, 'on') else 'Bateria bez alarmów' }}"
+            secondary: "{{ 'Kod: ' ~ state_attr(entity, 'kod') if is_state(entity, 'on') else 'BMS pracuje prawidłowo' }}"
+            icon: "{{ 'mdi:alert-octagon' if is_state(entity, 'on') else 'mdi:shield-check' }}"
+            icon_color: "{{ 'red' if is_state(entity, 'on') else 'green' }}"
+            tap_action:
+              action: more-info
+            grid_options:
+              columns: full
+
+      - type: grid
+        title: Bateria i odbiorniki
+        background:
+          color: blue
+          opacity: 8
+        cards:
+          - type: custom:mushroom-template-card
+            entity: sensor.dzialka_soc_baterii
+            primary: Bateria
+            secondary: "{{ states(entity) }}% · {{ states('sensor.dzialka_pozostala_pojemnosc') }} Ah"
+            icon: >-
+              {% set s=states(entity)|int(0) %}{% if s>=95 %}mdi:battery{% elif s>=85 %}mdi:battery-90{% elif s>=65 %}mdi:battery-70{% elif s>=45 %}mdi:battery-50{% elif s>=25 %}mdi:battery-30{% elif s>=10 %}mdi:battery-10{% else %}mdi:battery-alert{% endif %}
+            icon_color: >-
+              {% set s=states(entity)|int(0) %}{% if s<20 %}red{% elif s<50 %}orange{% else %}green{% endif %}
+            badge_icon: >-
+              {% set p=states('sensor.dzialka_moc_baterii')|float(0) %}{% if p>5 %}mdi:arrow-down-bold{% elif p<-5 %}mdi:arrow-up-bold{% else %}mdi:minus{% endif %}
+            badge_color: >-
+              {% set p=states('sensor.dzialka_moc_baterii')|float(0) %}{% if p>5 %}green{% elif p<-5 %}orange{% else %}grey{% endif %}
+            tap_action:
+              action: more-info
+            grid_options:
+              columns: full
+          - type: custom:mushroom-template-card
+            entity: sensor.dzialka_moc_baterii
+            primary: >-
+              {% set p=states(entity)|float(0) %}{% if p>5 %}Ładowanie{% elif p<-5 %}Rozładowanie{% else %}Spoczynek{% endif %}
+            secondary: "{{ states(entity) }} W"
+            icon: >-
+              {% set p=states(entity)|float(0) %}{% if p>5 %}mdi:battery-arrow-up{% elif p<-5 %}mdi:battery-arrow-down{% else %}mdi:battery-outline{% endif %}
+            icon_color: >-
+              {% set p=states(entity)|float(0) %}{% if p>5 %}green{% elif p<-5 %}orange{% else %}grey{% endif %}
+            grid_options:
+              columns: 6
+          - type: custom:mushroom-template-card
+            entity: sensor.dzialka_moc_odbiornikow
+            primary: Pobór mocy
+            secondary: "{{ states(entity) }} W"
+            icon: mdi:home-lightning-bolt
+            icon_color: >-
+              {% set p=states(entity)|float(0) %}{% if p>2500 %}red{% elif p>1000 %}orange{% else %}blue{% endif %}
+            grid_options:
+              columns: 6
+          - type: custom:mushroom-template-card
+            entity: sensor.dzialka_napiecie_baterii
+            primary: Napięcie
+            secondary: "{{ states(entity) }} V"
+            icon: mdi:sine-wave
+            icon_color: cyan
+            grid_options:
+              columns: 6
+          - type: custom:mushroom-template-card
+            entity: sensor.dzialka_prad_baterii
+            primary: Prąd baterii
+            secondary: "{{ states(entity) }} A"
+            icon: mdi:current-dc
+            icon_color: >-
+              {% set a=states(entity)|float(0) %}{% if a>0.3 %}green{% elif a<-0.3 %}orange{% else %}grey{% endif %}
+            grid_options:
+              columns: 6
+          - type: custom:mushroom-template-card
+            entity: sensor.dzialka_roznica_ogniw
+            primary: Różnica ogniw
+            secondary: "{{ states(entity) }} mV"
+            icon: mdi:battery-sync
+            icon_color: >-
+              {% set d=states(entity)|float(0) %}{% if d>50 %}red{% elif d>20 %}orange{% else %}green{% endif %}
+            grid_options:
+              columns: 6
+          - type: custom:mushroom-template-card
+            entity: sensor.dzialka_temperatura_bms
+            primary: Temperatura BMS
+            secondary: "{{ states(entity) }} °C"
+            icon: mdi:thermometer
+            icon_color: >-
+              {% set t=states(entity)|float(0) %}{% if t>50 %}red{% elif t>40 %}orange{% else %}teal{% endif %}
+            grid_options:
+              columns: 6
+
+      - type: grid
+        title: Sterowanie EMS
+        background:
+          color: purple
+          opacity: 8
+        cards:
+          - type: custom:mushroom-template-card
+            entity: select.dzialka_tryb_sterowania
+            primary: "Tryb {{ states(entity) | upper }}"
+            secondary: >-
+              {{ 'EMS sam steruje odbiornikami według dostępnej energii' if is_state(entity, 'auto') else 'Sterowanie ręczne — dotknij przekaźnika, aby go przełączyć' }}
+            icon: "{{ 'mdi:robot' if is_state(entity, 'auto') else 'mdi:gesture-tap-button' }}"
+            icon_color: "{{ 'green' if is_state(entity, 'auto') else 'deep-purple' }}"
+            multiline_secondary: true
+            tap_action:
+              action: perform-action
+              perform_action: select.select_next
+              target:
+                entity_id: select.dzialka_tryb_sterowania
+              data:
+                cycle: true
+            hold_action:
+              action: more-info
+            grid_options:
+              columns: full
+              rows: 2
+          - type: custom:mushroom-entity-card
+            entity: switch.dzialka_przekaznik_1
+            name: Przekaźnik 1
+            icon: mdi:electric-switch
+            icon_color: green
+            fill_container: true
+            tap_action: {action: toggle}
+            hold_action: {action: more-info}
+            grid_options: {columns: 6}
+          - type: custom:mushroom-entity-card
+            entity: switch.dzialka_przekaznik_2
+            name: Przekaźnik 2
+            icon: mdi:electric-switch
+            icon_color: green
+            fill_container: true
+            tap_action: {action: toggle}
+            hold_action: {action: more-info}
+            grid_options: {columns: 6}
+          - type: custom:mushroom-entity-card
+            entity: switch.dzialka_przekaznik_3
+            name: Przekaźnik 3
+            icon: mdi:electric-switch
+            icon_color: green
+            fill_container: true
+            tap_action: {action: toggle}
+            hold_action: {action: more-info}
+            grid_options: {columns: 6}
+          - type: custom:mushroom-entity-card
+            entity: switch.dzialka_przekaznik_4
+            name: Przekaźnik 4
+            icon: mdi:electric-switch
+            icon_color: green
+            fill_container: true
+            tap_action: {action: toggle}
+            hold_action: {action: more-info}
+            grid_options: {columns: 6}
+
+      - type: grid
+        title: Urządzenia satelitarne
+        background:
+          color: orange
+          opacity: 8
+        cards:
+          - type: custom:mushroom-entity-card
+            entity: switch.dzialka_studnia
+            name: Studnia
+            icon: mdi:water-pump
+            icon_color: cyan
+            fill_container: true
+            tap_action: {action: toggle}
+            hold_action: {action: more-info}
+            grid_options: {columns: 6, rows: 2}
+          - type: custom:mushroom-entity-card
+            entity: switch.dzialka_fontanna
+            name: Fontanna
+            icon: mdi:fountain
+            icon_color: blue
+            fill_container: true
+            tap_action: {action: toggle}
+            hold_action: {action: more-info}
+            grid_options: {columns: 6, rows: 2}
+          - type: custom:mushroom-entity-card
+            entity: switch.dzialka_bojler
+            name: Bojler
+            icon: mdi:water-boiler
+            icon_color: deep-orange
+            fill_container: true
+            tap_action: {action: toggle}
+            hold_action: {action: more-info}
+            grid_options: {columns: 6, rows: 2}
+          - type: custom:mushroom-entity-card
+            entity: switch.dzialka_pompa
+            name: Pompa
+            icon: mdi:pump
+            icon_color: cyan
+            fill_container: true
+            tap_action: {action: toggle}
+            hold_action: {action: more-info}
+            grid_options: {columns: 6, rows: 2}
+          - type: custom:mushroom-entity-card
+            entity: switch.dzialka_oswietlenie
+            name: Oświetlenie
+            icon: mdi:outdoor-lamp
+            icon_color: amber
+            fill_container: true
+            tap_action: {action: toggle}
+            hold_action: {action: more-info}
+            grid_options: {columns: 6, rows: 2}
+          - type: markdown
+            content: >-
+              **MQTT:** EMS wysyła automatykę na
+              `ems/sterownik-dzialka/load/<nazwa>/set`, ręczne polecenia na
+              `ems/remote/<nazwa>/set`, a HA publikuje rzeczywisty stan na
+              `ems/remote/<nazwa>/state` z `retain`.
+            grid_options: {columns: full}
+
+      - type: grid
+        title: Historia i diagnostyka
+        cards:
+          - type: history-graph
+            title: Energia — 24 godziny
+            hours_to_show: 24
+            entities:
+              - {entity: sensor.dzialka_moc_pv, name: PV}
+              - {entity: sensor.dzialka_moc_odbiornikow, name: Pobór}
+              - {entity: sensor.dzialka_moc_baterii, name: Bateria}
+            grid_options: {columns: full}
+          - type: entities
+            title: Stan systemu
+            show_header_toggle: false
+            entities:
+              - binary_sensor.dzialka_sterownik_online
+              - binary_sensor.dzialka_falownik_online
+              - binary_sensor.dzialka_bms_online
+              - sensor.dzialka_tryb_falownika
+              - sensor.dzialka_temperatura_falownika
+              - sensor.dzialka_napiecie_wyjsciowe
+              - sensor.dzialka_obciazenie_falownika
+            grid_options: {columns: full}
+
+      - type: grid
+        title: Ogniwa baterii
+        cards:
+          - type: entities
+            title: Napięcia ogniw
+            show_header_toggle: false
+            entities:
+              - sensor.dzialka_ogniwo_1
+              - sensor.dzialka_ogniwo_2
+              - sensor.dzialka_ogniwo_3
+              - sensor.dzialka_ogniwo_4
+              - sensor.dzialka_ogniwo_5
+              - sensor.dzialka_ogniwo_6
+              - sensor.dzialka_ogniwo_7
+              - sensor.dzialka_ogniwo_8
+            grid_options: {columns: full}
+          - type: history-graph
+            title: Bateria — 24 godziny
+            hours_to_show: 24
+            entities:
+              - {entity: sensor.dzialka_soc_baterii, name: SOC}
+              - {entity: sensor.dzialka_napiecie_baterii, name: Napięcie}
+            grid_options: {columns: full}

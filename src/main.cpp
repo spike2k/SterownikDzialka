@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <esp_ota_ops.h>
 #include <esp_task_wdt.h>
 
 #include "AppConfig.h"
@@ -31,6 +32,8 @@ uint32_t lastTelemetryMs = 0;
 void setup() {
   Serial.begin(115200);
   delay(100);
+  // Jeżeli bootloader używa rollbacku, nowy obraz potwierdzamy zanim ruszą sterowniki.
+  esp_ota_mark_app_valid_cancel_rollback();
   Serial.println("\nSterownik Dzialka EMS start");
   esp_task_wdt_init(10, true);
   esp_task_wdt_add(nullptr);

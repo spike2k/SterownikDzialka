@@ -1,6 +1,8 @@
 #include "services/NetworkService.h"
 
 #include <HTTPClient.h>
+#include <esp_task_wdt.h>
+#include <math.h>
 #include <string.h>
 #include <time.h>
 #include "AppConfig.h"
@@ -77,13 +79,25 @@ void NetworkService::tick(const Telemetry& telemetry) {
     if (!mqtt_.connected() && millis() - lastMqttAttemptMs_ >= Config::mqttRetryMs) connectMqtt();
     mqtt_.loop();
     if (mqtt_.connected()) {
+      updateSunMode(telemetry.pvPowerW);
+      const uint32_t now = millis();
       const bool refreshLoads =
-          lastMqttLoadRefreshMs_ == 0 || millis() - lastMqttLoadRefreshMs_ >= Config::mqttLoadRefreshMs;
-      publishLoadCommands(refreshLoads);
-      if (refreshLoads) lastMqttLoadRefreshMs_ = millis();
-      if (millis() - lastMqttPublishMs_ >= Config::mqttPublishIntervalMs) {
+          lastMqttLoadRefreshMs_ == 0 || now - lastMqttLoadRefreshMs_ >= currentLoadRefreshMs();
+      const bool loadChanged = publishLoadCommands(refreshLoads);
+      const bool controlChanged = publishControlState(false);
+      if (refreshLoads) lastMqttLoadRefreshMs_ = now;
+      if (loadChanged || controlChanged) startBurst();
+
+      const bool dueByInterval =
+          lastMqttPublishMs_ == 0 || now - lastMqttPublishMs_ >= currentPublishIntervalMs();
+      const bool dueByDelta = significantTelemetryChange(telemetry);
+      if (dueByDelta) startBurst();
+
+      if (stateGetRequested_ || loadChanged || controlChanged || dueByInterval || dueByDelta) {
         publish(telemetry);
-        lastMqttPublishMs_ = millis();
+        rememberPublished(telemetry);
+        lastMqttPublishMs_ = now;
+        stateGetRequested_ = false;
       }
     }
   }
@@ -124,9 +138,15 @@ String NetworkService::ipAddress() const {
 }
 
 bool NetworkService::sendRemoteMqtt(const String& device, bool enabled) {
-  if (!mqtt_.connected() || device.isEmpty()) return false;
-  const String topic = "ems/remote/" + device + "/set";
-  return mqtt_.publish(topic.c_str(), enabled ? "ON" : "OFF", false);
+  if (!mqtt_.connected() || device.isEmpty() || !Settings::validMqttKey(device.c_str())) return false;
+  const String legacyTopic = "ems/remote/" + device + "/set";
+  const String satelliteTopic = String(Config::mqttSatelliteCommandPrefix) + device +
+                                Config::mqttSatelliteCommandSuffix;
+  const String openBekenTopic = device + "/0/set";
+  const bool legacyPublished = mqtt_.publish(legacyTopic.c_str(), enabled ? "ON" : "OFF", false);
+  const bool satellitePublished = mqtt_.publish(satelliteTopic.c_str(), enabled ? "ON" : "OFF", false);
+  const bool openBekenPublished = mqtt_.publish(openBekenTopic.c_str(), enabled ? "1" : "0", false);
+  return legacyPublished || satellitePublished || openBekenPublished;
 }
 
 bool NetworkService::sendRemoteHttp(const String& url, bool enabled) {
@@ -187,13 +207,20 @@ void NetworkService::connectMqtt() {
     return;
   }
 
-  if (!mqtt_.subscribe(Config::mqttRelayCommandTopic, 1) || !mqtt_.subscribe(Config::mqttOtaCommandTopic, 1)) {
+  if (!mqtt_.subscribe(Config::mqttRelayCommandTopic, 1) || !mqtt_.subscribe(Config::mqttModeCommandTopic, 1) ||
+      !mqtt_.subscribe(Config::mqttOtaCommandTopic, 1) || !mqtt_.subscribe(Config::mqttStateGetTopic, 1) ||
+      !mqtt_.subscribe(Config::mqttSatelliteStateTopic, 1) ||
+      !mqtt_.subscribe(Config::mqttSatelliteAvailabilityTopic, 1) ||
+      !mqtt_.subscribe(Config::mqttOpenBekenStateTopic, 1) ||
+      !mqtt_.subscribe(Config::mqttOpenBekenAvailabilityTopic, 1)) {
     Serial.println("MQTT subscribe error");
     mqtt_.disconnect();
     return;
   }
   mqtt_.publish(Config::mqttStatusTopic, kOnline, true);
+  publishControlState(true);
   publishOtaStatus("ready");
+  lastMqttPublishMs_ = 0;
   lastMqttLoadRefreshMs_ = 0;
   for (size_t index = 0; index < Config::loadCount; ++index) lastLoadKeyValid_[index] = false;
   Serial.println("MQTT TLS OK");
@@ -221,30 +248,160 @@ void NetworkService::publish(const Telemetry& telemetry) {
   mqtt_.publish(Config::mqttStateTopic, json.c_str(), true);
 }
 
-void NetworkService::publishLoadCommands(bool force) {
-  if (!mqtt_.connected() || !relays_ || !settings_) return;
+bool NetworkService::publishControlState(bool force) {
+  if (!mqtt_.connected() || !relays_) return false;
+  bool changed = false;
+  const ControlMode mode = relays_->mode();
+  if (force || !lastModeValid_ || mode != lastMode_) {
+    if (mqtt_.publish(Config::mqttModeStateTopic, mode == ControlMode::Auto ? "auto" : "manual", true)) {
+      lastMode_ = mode;
+      lastModeValid_ = true;
+      changed = true;
+    }
+  }
+  for (size_t index = 0; index < Config::loadCount; ++index) {
+    const bool enabled = relays_->confirmedState(index);
+    if (!force && lastRelayStateValid_[index] && lastRelayOn_[index] == enabled) continue;
+    if (!publishRelayState(index)) continue;
+    lastRelayOn_[index] = enabled;
+    lastRelayStateValid_[index] = true;
+    changed = true;
+  }
+  return changed;
+}
+
+bool NetworkService::publishRelayState(size_t index) {
+  if (!mqtt_.connected() || !relays_ || index >= Config::loadCount) return false;
+  char topic[80];
+  snprintf(topic, sizeof(topic), "%s%u/state", Config::mqttRelayCommandPrefix, static_cast<unsigned>(index));
+  return mqtt_.publish(topic, relays_->confirmedState(index) ? "ON" : "OFF", true);
+}
+
+void NetworkService::updateSunMode(float pvPowerW) {
+  const uint32_t now = millis();
+  if (daytime_) {
+    if (pvPowerW < Config::mqttNightEnterPvW) {
+      if (lowPvSinceMs_ == 0) lowPvSinceMs_ = now;
+      if (now - lowPvSinceMs_ >= Config::mqttNightConfirmMs) {
+        daytime_ = false;
+        highPvSinceMs_ = 0;
+        Serial.println("MQTT: tryb noc (PV niski)");
+      }
+    } else {
+      lowPvSinceMs_ = 0;
+    }
+    return;
+  }
+
+  if (pvPowerW >= Config::mqttDayEnterPvW) {
+    if (highPvSinceMs_ == 0) highPvSinceMs_ = now;
+    if (now - highPvSinceMs_ >= Config::mqttDayConfirmMs) {
+      daytime_ = true;
+      lowPvSinceMs_ = 0;
+      lastMqttPublishMs_ = 0;
+      Serial.println("MQTT: tryb dzien (PV produkuje)");
+    }
+  } else {
+    highPvSinceMs_ = 0;
+  }
+}
+
+uint32_t NetworkService::currentPublishIntervalMs() const {
+  return (daytime_ || burstActive()) ? Config::mqttPublishDayMs : Config::mqttPublishNightMs;
+}
+
+uint32_t NetworkService::currentLoadRefreshMs() const {
+  return (daytime_ || burstActive()) ? Config::mqttLoadRefreshDayMs : Config::mqttLoadRefreshNightMs;
+}
+
+bool NetworkService::significantTelemetryChange(const Telemetry& telemetry) const {
+  if (!havePublishedSnapshot_) return false;
+  if (fabsf(telemetry.pvPowerW - lastPublishedPvW_) >= Config::mqttDeltaPvW) return true;
+  if (fabsf(telemetry.loadPowerW - lastPublishedLoadW_) >= Config::mqttDeltaLoadW) return true;
+  if (fabsf(telemetry.batterySoc - lastPublishedSoc_) >= Config::mqttDeltaSoc) return true;
+  if (fabsf(telemetry.batteryCurrentA - lastPublishedBatteryA_) >= Config::mqttDeltaBatteryA) return true;
+  return false;
+}
+
+void NetworkService::rememberPublished(const Telemetry& telemetry) {
+  lastPublishedPvW_ = telemetry.pvPowerW;
+  lastPublishedLoadW_ = telemetry.loadPowerW;
+  lastPublishedSoc_ = telemetry.batterySoc;
+  lastPublishedBatteryA_ = telemetry.batteryCurrentA;
+  havePublishedSnapshot_ = true;
+}
+
+void NetworkService::startBurst() {
+  burstUntilMs_ = millis() + Config::mqttBurstWindowMs;
+  if (burstUntilMs_ == 0) burstUntilMs_ = 1;
+}
+
+bool NetworkService::burstActive() const {
+  return burstUntilMs_ != 0 && static_cast<int32_t>(millis() - burstUntilMs_) < 0;
+}
+
+bool NetworkService::publishLoadCommands(bool force) {
+  if (!mqtt_.connected() || !relays_ || !settings_) return false;
+  bool changed = false;
   for (size_t index = 0; index < Config::loadCount; ++index) {
     const char* key = settings_->values.loads[index].mqttKey;
     if (lastLoadKeyValid_[index] && strcmp(lastLoadKey_[index], key) != 0) {
       if (lastLoadKey_[index][0] != '\0') publishLoad(lastLoadKey_[index], false);
       lastLoadKeyValid_[index] = false;
+      changed = true;
     }
     if (key[0] == '\0') continue;
     const bool enabled = relays_->state(index);
-    if (!force && lastLoadKeyValid_[index] && lastLoadOn_[index] == enabled) continue;
+    const bool isChange = !lastLoadKeyValid_[index] || lastLoadOn_[index] != enabled;
+    if (!force && !isChange) continue;
     if (!publishLoad(key, enabled)) continue;
+    if (isChange) changed = true;
     strncpy(lastLoadKey_[index], key, Config::labelBytes - 1);
     lastLoadKey_[index][Config::labelBytes - 1] = '\0';
     lastLoadOn_[index] = enabled;
     lastLoadKeyValid_[index] = true;
   }
+  return changed;
 }
 
 bool NetworkService::publishLoad(const char* key, bool enabled) {
   if (!key || key[0] == '\0') return false;
-  char topic[80];
-  snprintf(topic, sizeof(topic), "%s%s/set", Config::mqttLoadCommandPrefix, key);
-  return mqtt_.publish(topic, enabled ? "ON" : "OFF", false);
+  char legacyTopic[80];
+  char satelliteTopic[80];
+  char openBekenTopic[80];
+  snprintf(legacyTopic, sizeof(legacyTopic), "%s%s/set", Config::mqttLoadCommandPrefix, key);
+  snprintf(satelliteTopic, sizeof(satelliteTopic), "%s%s%s", Config::mqttSatelliteCommandPrefix, key,
+           Config::mqttSatelliteCommandSuffix);
+  snprintf(openBekenTopic, sizeof(openBekenTopic), "%s/0/set", key);
+  const bool legacyPublished = mqtt_.publish(legacyTopic, enabled ? "ON" : "OFF", false);
+  const bool satellitePublished = mqtt_.publish(satelliteTopic, enabled ? "ON" : "OFF", false);
+  const bool openBekenPublished = mqtt_.publish(openBekenTopic, enabled ? "1" : "0", false);
+  return legacyPublished || satellitePublished || openBekenPublished;
+}
+
+int NetworkService::loadIndexForMqttKey(const String& key) const {
+  if (!settings_ || key.isEmpty() || !Settings::validMqttKey(key.c_str())) return -1;
+  for (size_t index = 0; index < Config::loadCount; ++index) {
+    if (key.equals(settings_->values.loads[index].mqttKey)) return static_cast<int>(index);
+  }
+  return -1;
+}
+
+bool NetworkService::parseOnOff(const uint8_t* payload, unsigned int length, bool& enabled) const {
+  String value;
+  value.reserve(length);
+  for (unsigned int index = 0; index < length; ++index) value += static_cast<char>(payload[index]);
+  value.trim();
+  value.toLowerCase();
+  if (value == "on" || value == "1" || value == "true") {
+    enabled = true;
+    return true;
+  }
+  if (value == "off" || value == "0" || value == "false") {
+    enabled = false;
+    return true;
+  }
+  return false;
 }
 
 void NetworkService::handlePendingOta() {
@@ -256,8 +413,12 @@ void NetworkService::handlePendingOta() {
   mqtt_.loop();
   Serial.printf("OTA: pobieranie %s\n", Config::otaFirmwareUrl);
 
+  // HTTPS i finalizacja obrazu mogą trwać dłużej niż watchdog pętli głównej.
+  // W razie błędu przywracamy nadzór; po sukcesie urządzenie natychmiast się restartuje.
+  const bool watchdogWasRegistered = esp_task_wdt_delete(nullptr) == ESP_OK;
   String error;
   if (!otaUpdater_.install(expectedSha256, error)) {
+    if (watchdogWasRegistered) esp_task_wdt_add(nullptr);
     Serial.printf("OTA error: %s\n", error.c_str());
     publishOtaStatus("error", error.c_str());
     return;
@@ -271,7 +432,8 @@ void NetworkService::handlePendingOta() {
 
 void NetworkService::publishOtaStatus(const char* state, const char* detail) {
   if (!mqtt_.connected()) return;
-  String json = String("{\"state\":\"") + state + "\",\"currentFirmwareMd5\":\"" + ESP.getSketchMD5() + "\"";
+  String json = String("{\"state\":\"") + state + "\",\"firmwareVersion\":\"" + Config::firmwareVersion +
+                "\",\"currentFirmwareMd5\":\"" + ESP.getSketchMD5() + "\"";
   if (detail && detail[0] != '\0') {
     String safeDetail(detail);
     safeDetail.replace("\\", "\\\\");
@@ -283,6 +445,61 @@ void NetworkService::publishOtaStatus(const char* state, const char* detail) {
 }
 
 void NetworkService::onMqtt(char* topic, uint8_t* payload, unsigned int length) {
+  const String topicText(topic);
+  const String statePrefix(Config::mqttSatelliteStatePrefix);
+  const String availabilityPrefix(Config::mqttSatelliteAvailabilityPrefix);
+  const String powerSuffix(Config::mqttSatelliteCommandSuffix);
+  const String lwtSuffix("/LWT");
+  const String openBekenStateSuffix(Config::mqttOpenBekenStateSuffix);
+  const String openBekenAvailabilitySuffix(Config::mqttOpenBekenAvailabilitySuffix);
+
+  const bool canonicalState = topicText.startsWith(statePrefix) && topicText.endsWith(powerSuffix);
+  const bool openBekenState = topicText.endsWith(openBekenStateSuffix);
+  if (canonicalState || openBekenState) {
+    const String key = canonicalState
+                           ? topicText.substring(statePrefix.length(), topicText.length() - powerSuffix.length())
+                           : topicText.substring(0, topicText.length() - openBekenStateSuffix.length());
+    const int index = loadIndexForMqttKey(key);
+    bool enabled = false;
+    if (index < 0 || !parseOnOff(payload, length, enabled) || !relays_) return;
+    relays_->reportRemoteState(static_cast<size_t>(index), enabled);
+    if (relays_->mode() == ControlMode::Auto && relays_->state(static_cast<size_t>(index)) != enabled) {
+      // Jedno natychmiastowe ponowienie; kolejne proby robi okresowy refresh,
+      // wiec niedostepna satelita nie zalewa brokera w kazdej petli.
+      lastLoadKeyValid_[index] = false;
+    }
+    lastRelayStateValid_[index] = false;
+    stateGetRequested_ = true;
+    startBurst();
+    return;
+  }
+
+  const bool canonicalAvailability = topicText.startsWith(availabilityPrefix) && topicText.endsWith(lwtSuffix);
+  const bool openBekenAvailability = topicText.endsWith(openBekenAvailabilitySuffix);
+  if (canonicalAvailability || openBekenAvailability) {
+    const String key = canonicalAvailability
+                           ? topicText.substring(availabilityPrefix.length(), topicText.length() - lwtSuffix.length())
+                           : topicText.substring(0, topicText.length() - openBekenAvailabilitySuffix.length());
+    const int index = loadIndexForMqttKey(key);
+    if (index < 0 || !relays_) return;
+    String value;
+    for (unsigned int position = 0; position < length; ++position) value += static_cast<char>(payload[position]);
+    value.trim();
+    value.toLowerCase();
+    if (value != "online" && value != "offline") return;
+    const bool online = value == "online";
+    relays_->reportRemoteAvailability(static_cast<size_t>(index), online);
+    if (online) lastLoadKeyValid_[index] = false;
+    stateGetRequested_ = true;
+    startBurst();
+    return;
+  }
+
+  if (strcmp(topic, Config::mqttStateGetTopic) == 0) {
+    stateGetRequested_ = true;
+    return;
+  }
+
   if (strcmp(topic, Config::mqttOtaCommandTopic) == 0) {
     if (length == 0) return;
     if (!validSha256(reinterpret_cast<const char*>(payload), length)) {
@@ -298,8 +515,24 @@ void NetworkService::onMqtt(char* topic, uint8_t* payload, unsigned int length) 
     return;
   }
 
+  if (strcmp(topic, Config::mqttModeCommandTopic) == 0) {
+    if (!relays_) return;
+    String command;
+    for (unsigned int position = 0; position < length; ++position) command += static_cast<char>(payload[position]);
+    command.toLowerCase();
+    if (command == "auto") {
+      relays_->setMode(ControlMode::Auto);
+    } else if (command == "manual") {
+      relays_->setMode(ControlMode::Manual);
+    } else {
+      return;
+    }
+    publishControlState(true);
+    stateGetRequested_ = true;
+    return;
+  }
+
   if (!relays_ || relays_->mode() != ControlMode::Manual) return;
-  const String topicText(topic);
   if (!topicText.startsWith(Config::mqttRelayCommandPrefix) || !topicText.endsWith("/set")) return;
   const size_t indexStart = strlen(Config::mqttRelayCommandPrefix);
   const String indexText = topicText.substring(indexStart, topicText.length() - 4);
@@ -308,14 +541,13 @@ void NetworkService::onMqtt(char* topic, uint8_t* payload, unsigned int length) 
   if (index < 0 || index >= static_cast<int>(Config::loadCount)) return;
   if (relays_->pin(static_cast<size_t>(index)) < 0) return;
 
-  String command;
-  for (unsigned int position = 0; position < length; ++position) command += static_cast<char>(payload[position]);
   bool enabled = false;
-  if (command == "ON" || command == "1" || command == "true") {
-    enabled = true;
-  } else if (command != "OFF" && command != "0" && command != "false") {
-    return;
+  if (!parseOnOff(payload, length, enabled)) return;
+  if (relays_->setRelay(static_cast<size_t>(index), enabled)) {
+    publishRelayState(static_cast<size_t>(index));
+    lastRelayOn_[index] = relays_->state(static_cast<size_t>(index));
+    lastRelayStateValid_[index] = true;
+    stateGetRequested_ = true;
   }
-  relays_->setRelay(static_cast<size_t>(index), enabled);
 }
 

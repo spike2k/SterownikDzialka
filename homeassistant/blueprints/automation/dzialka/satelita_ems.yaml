@@ -1,0 +1,176 @@
+blueprint:
+  name: "Działka — most satelity EMS"
+  description: >-
+    Łączy fizyczną encję switch w Home Assistant z protokołem satelitów
+    Sterownika Działka. Obsługuje polecenia automatyczne i ręczne, publikuje
+    rzeczywisty stan z retain oraz wyłącza odbiornik, gdy EMS zgłosi offline.
+  domain: automation
+  author: "Sterownik Działka"
+  homeassistant:
+    min_version: "2024.10.0"
+  input:
+    satellite_id:
+      name: Identyfikator MQTT satelity
+      description: >-
+        Ten sam klucz, który jest wpisany w EMS jako identyfikator MQTT
+        odbiornika, np. studnia, fontanna albo bojler.
+      selector:
+        text:
+    physical_switch:
+      name: Fizyczny przełącznik
+      description: >-
+        Encja sterująca prawdziwym przekaźnikiem. Może pochodzić z OpenBeken,
+        WifiSmartSwitch albo dowolnej innej integracji Home Assistant.
+      selector:
+        entity:
+          filter:
+            domain: switch
+
+mode: queued
+max: 10
+max_exceeded: silent
+
+trigger_variables:
+  satellite_id: !input satellite_id
+
+triggers:
+  - trigger: mqtt
+    topic: "ems/sterownik-dzialka/load/{{ satellite_id }}/set"
+    id: command
+  - trigger: mqtt
+    topic: "ems/remote/{{ satellite_id }}/set"
+    id: command
+  - trigger: mqtt
+    topic: "cmnd/{{ satellite_id }}/POWER"
+    id: command
+  - trigger: mqtt
+    topic: "ems/sterownik-dzialka/status"
+    payload: "offline"
+    id: ems_offline
+  - trigger: state
+    entity_id: !input physical_switch
+    id: physical_state
+  - trigger: homeassistant
+    event: start
+    id: ha_start
+
+variables:
+  satellite_id_value: !input satellite_id
+  physical_switch_value: !input physical_switch
+
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: command
+          - condition: template
+            value_template: "{{ trigger.payload | trim | upper == 'ON' }}"
+          - condition: state
+            entity_id: binary_sensor.dzialka_sterownik_online
+            state: "on"
+        sequence:
+          - action: switch.turn_on
+            target:
+              entity_id: !input physical_switch
+
+      - conditions:
+          - condition: trigger
+            id: command
+          - condition: template
+            value_template: "{{ trigger.payload | trim | upper == 'OFF' }}"
+        sequence:
+          - action: switch.turn_off
+            target:
+              entity_id: !input physical_switch
+
+      - conditions:
+          - condition: trigger
+            id: ems_offline
+        sequence:
+          - action: switch.turn_off
+            target:
+              entity_id: !input physical_switch
+
+      # Jeżeli satelita wróci po awarii albo ktoś naciśnie jego lokalny przycisk,
+      # nie pozwól mu pozostać włączonym bez aktywnego kontrolera EMS.
+      - conditions:
+          - condition: trigger
+            id: physical_state
+          - condition: template
+            value_template: >-
+              {{ trigger.to_state is not none and
+                 trigger.to_state.state == 'on' and
+                 not is_state('binary_sensor.dzialka_sterownik_online', 'on') }}
+        sequence:
+          - action: switch.turn_off
+            target:
+              entity_id: !input physical_switch
+
+      - conditions:
+          - condition: trigger
+            id: physical_state
+          - condition: template
+            value_template: >-
+              {{ trigger.to_state is not none and
+                 trigger.to_state.state in ['on', 'off'] }}
+        sequence:
+          - action: mqtt.publish
+            data:
+              topic: "ems/remote/{{ satellite_id_value }}/state"
+              payload: "{{ trigger.to_state.state | upper }}"
+              qos: 1
+              retain: true
+          - action: mqtt.publish
+            data:
+              topic: "stat/{{ satellite_id_value }}/POWER"
+              payload: "{{ trigger.to_state.state | upper }}"
+              qos: 1
+              retain: true
+          - action: mqtt.publish
+            data:
+              topic: "tele/{{ satellite_id_value }}/LWT"
+              payload: "Online"
+              qos: 1
+              retain: true
+
+      - conditions:
+          - condition: trigger
+            id: physical_state
+          - condition: template
+            value_template: >-
+              {{ trigger.to_state is not none and
+                 trigger.to_state.state in ['unavailable', 'unknown'] }}
+        sequence:
+          - action: mqtt.publish
+            data:
+              topic: "tele/{{ satellite_id_value }}/LWT"
+              payload: "Offline"
+              qos: 1
+              retain: true
+
+      - conditions:
+          - condition: trigger
+            id: ha_start
+        sequence:
+          - delay: "00:00:10"
+          - condition: template
+            value_template: >-
+              {{ states(physical_switch_value) in ['on', 'off'] }}
+          - action: mqtt.publish
+            data:
+              topic: "ems/remote/{{ satellite_id_value }}/state"
+              payload: "{{ states(physical_switch_value) | upper }}"
+              qos: 1
+              retain: true
+          - action: mqtt.publish
+            data:
+              topic: "stat/{{ satellite_id_value }}/POWER"
+              payload: "{{ states(physical_switch_value) | upper }}"
+              qos: 1
+              retain: true
+          - action: mqtt.publish
+            data:
+              topic: "tele/{{ satellite_id_value }}/LWT"
+              payload: "Online"
+              qos: 1
+              retain: true

@@ -6,7 +6,7 @@
 #include "AppConfig.h"
 #include "core/Settings.h"
 #include "core/TelemetryJson.h"
-#include "web/PanelPage.h"
+#include "web/PanelPageGz.h"
 
 namespace {
 
@@ -90,7 +90,11 @@ void WebPanel::begin(Telemetry& telemetry, RelayController& relays, NetworkServi
   network_ = &network;
   settings_ = &settings;
   inputs_ = &inputs;
-  server_.on("/", HTTP_GET, [this]() { server_.send_P(200, "text/html; charset=utf-8", PanelHtml); });
+  server_.on("/", HTTP_GET, [this]() {
+    server_.sendHeader("Content-Encoding", "gzip");
+    server_.send_P(200, "text/html; charset=utf-8", reinterpret_cast<const char*>(PanelHtmlGz),
+                   PanelHtmlGzLength);
+  });
   server_.on("/api/state", HTTP_GET, [this]() { handleState(); });
   server_.on("/api/settings", HTTP_GET, [this]() { handleSettingsGet(); });
   server_.on("/api/settings", HTTP_POST, [this]() { handleSettingsPost(); });
@@ -388,7 +392,12 @@ String WebPanel::stateJson() const {
     if (index) json += ',';
     const auto& channel = settings_->values.loads[index];
     json += "{\"id\":" + String(index);
-    json += ",\"on\":" + String(relays_->state(index) ? "true" : "false");
+    json += ",\"on\":" + String(relays_->confirmedState(index) ? "true" : "false");
+    json += ",\"desiredOn\":" + String(relays_->state(index) ? "true" : "false");
+    json += ",\"stateKnown\":" + String(relays_->confirmedStateKnown(index) ? "true" : "false");
+    json += ",\"available\":" + String(relays_->remoteAvailable(index) ? "true" : "false");
+    json += ",\"availabilityKnown\":" +
+            String(relays_->remoteAvailabilityKnown(index) ? "true" : "false");
     json += ",\"pin\":" + String(channel.pin);
     json += ",\"mqttKey\":" + jsonEscape(channel.mqttKey);
     json += ",\"name\":" + jsonEscape(channel.name);

@@ -1,0 +1,35 @@
+# Fizyczne urządzenia satelitarne i ich połączenie z EMS.
+# Pierwszy satelita: OpenBeken BK7231N, MQTT base topic "studnia", kanał 0.
+
+mqtt:
+  switch:
+    - name: "Studnia — przekaźnik OpenBeken"
+      default_entity_id: switch.dzialka_studnia_sprzet
+      unique_id: dzialka_studnia_openbeken_channel_0
+      state_topic: "studnia/0/get"
+      command_topic: "studnia/0/set"
+      payload_on: "1"
+      payload_off: "0"
+      optimistic: false
+      qos: 1
+      retain: false
+      availability_topic: "studnia/connected"
+      payload_available: "online"
+      payload_not_available: "offline"
+      icon: mdi:water-pump
+      device:
+        identifiers:
+          - openbeken-studnia-557b7d6c
+        name: "Studnia — OpenBeken"
+        manufacturer: "OpenBeken"
+        model: "Mini Smart Switch / BK7231N"
+        suggested_area: "Studnia"
+
+automation:
+  - id: dzialka_studnia_most_ems
+    alias: "Działka — most EMS satelity studnia"
+    use_blueprint:
+      path: dzialka/satelita_ems.yaml
+      input:
+        satellite_id: studnia
+        physical_switch: switch.dzialka_studnia_sprzet

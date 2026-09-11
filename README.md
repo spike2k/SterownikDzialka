@@ -44,7 +44,7 @@ Przekaźniki PCB nie powinny bezpośrednio przełączać dużych obciążeń 230
 
 Piny UART można zmienić w panelu WWW (koło zębate). Zmiana komunikacji wymaga restartu ESP. GPIO 6–11 zajmuje flash, 34–39 są tylko wejściami. Moduł przekaźników jest domyślnie aktywny stanem niskim.
 
-Kanał odbiornika jest aktywny, gdy ma GPIO ≥ 0 albo wypełniony identyfikator MQTT (np. `fontanna`). Oba puste = slot wyłączony. W Auto nadwyżka `pvW − loadW + moc lokalnych ON − rezerwa` jest rozdzielana od priorytetu 1 w dół; kanał z mocą 0 W jest pomijany. Histereza i minimalny czas przełączenia ograniczają cykanie styków. Satelita MQTT nasłuchuje `ems/sterownik-dzialka/load/{id}/set` oraz `ems/sterownik-dzialka/status` i gaśnie przy `offline`.
+Kanał odbiornika jest aktywny, gdy ma GPIO ≥ 0 albo wypełniony identyfikator MQTT (np. `fontanna`). Oba puste = slot wyłączony. W Auto nadwyżka `pvW − loadW + moc lokalnych ON − rezerwa` jest rozdzielana od priorytetu 1 w dół; kanał z mocą 0 W jest pomijany. Histereza i minimalny czas przełączenia ograniczają cykanie styków. Most satelity w HA nasłuchuje `ems/sterownik-dzialka/load/{id}/set` oraz `ems/sterownik-dzialka/status`, steruje fizyczną encją i wyłącza ją przy `offline`.
 
 ## Konfiguracja
 
@@ -71,7 +71,17 @@ Polecenie `upload` uruchamiaj dopiero po podłączeniu właściwego ESP32 i spra
 
 ### Aktualizacja OTA z PC
 
-Pierwszą wersję z OTA trzeba wgrać do ESP32 przez USB. Następne aktualizacje:
+Pierwszą wersję z poprawionym OTA trzeba wgrać do ESP32 przez USB. Dla bieżącego
+wydania użyj środowiska `esp32dev` — PlatformIO zapisze bootloader, tablicę
+partycji i aplikację, pozostawiając konfigurację NVS:
+
+```powershell
+C:\Users\rozma\.platformio\penv\Scripts\platformio.exe run -e esp32dev -t upload --upload-port COMx
+```
+
+Zastąp `COMx` portem widocznym po podłączeniu sterownika. Nie zapisuj samego
+`firmware.bin` pod adresem `0x0000`; jest to obraz aplikacji przeznaczony na
+partycję aplikacji/OTA. Następne aktualizacje:
 
 1. Zbuduj firmware: `python -m platformio run -e esp32dev`.
 2. Wgraj `.pio/build/esp32dev/firmware.bin` jako `https://www.warsztatweb.pl/esp32/dzialka/firmware.bin`.
@@ -80,6 +90,14 @@ Pierwszą wersję z OTA trzeba wgrać do ESP32 przez USB. Następne aktualizacje
 5. Wyślij trigger: `python tools/ota_trigger.py`.
 
 Skrypt przed wysłaniem komendy pobiera plik z serwera i wymaga, aby jego rozmiar oraz SHA-256 były identyczne z lokalnym buildem. ESP32 ponownie liczy SHA-256 podczas pobierania i aktywuje nową partycję wyłącznie po zgodnej weryfikacji. Komenda MQTT to nieutrwalona wiadomość zawierająca 64-znakowy SHA-256 na `ems/sterownik-dzialka/ota/set`; wynik jest publikowany na `ems/sterownik-dzialka/ota/status`. Adres firmware jest stały w urządzeniu i używa HTTPS. Nie wystawiaj panelu WWW ESP32 bezpośrednio do Internetu.
+
+Przed rozpoczęciem DNS/HTTPS firmware wypisuje bieżące zadanie z watchdoga, a
+po nieudanej aktualizacji zapisuje je ponownie. Nowa partycja jest zatwierdzana
+na samym początku `setup()`. Dzięki temu dłuższy handshake TLS nie resetuje
+aktualizacji, a poprawnie uruchomiony obraz nie wpada w automatyczny rollback.
+
+Status OTA zawiera również jawne pole `firmwareVersion`. Po restarcie sprawdzaj
+je zamiast polegać wyłącznie na `currentFirmwareMd5`.
 
 ### Jednorazowy test JK-BMS BLE
 
@@ -126,11 +144,16 @@ python -m platformio run -e esp32dev -t upload
 
 ## MQTT i API
 
-- telemetria retained: `ems/sterownik-dzialka/state`; częste próbki korzystają z QoS 0,
+- telemetria retained: `ems/sterownik-dzialka/state`; QoS 0. Interwał zależy od PV: ok. 15 s gdy słońce produkuje (≥ 50 W), 5 min po spadku PV poniżej 20 W. Skok obciążenia/PV/SOC/prądu baterii albo zmiana odbiornika publikuje od razu i przez 90 s wraca do rytmu dziennego. MQTT zostaje połączony w nocy,
+- odświeżenie na żądanie: publikacja dowolnego payloadu na `ems/sterownik-dzialka/state/get` (QoS 1, bez retain) wymusza natychmiastowy `state`,
 - dostępność retained: `ems/sterownik-dzialka/status`; `online` po połączeniu i Last Will `offline` z QoS 1,
-- odbiorniki MQTT (Auto i Manual): `ems/sterownik-dzialka/load/{id}/set`, payload `ON` lub `OFF`, bez retain; ponowienie co 30 s,
+- tryb sterowania retained: `ems/sterownik-dzialka/mode/state`; zmiana przez `ems/sterownik-dzialka/mode/set`, payload `auto` albo `manual`,
+- potwierdzony stan wyjść retained: `ems/sterownik-dzialka/relay/{0..9}/state`; polecenia nadal trafiają na odpowiadający temat `/set`,
+- odbiorniki MQTT w okresie migracji: EMS publikuje równolegle stary `ems/sterownik-dzialka/load/{id}/set` i docelowy `cmnd/{id}/POWER`, payload `ON` lub `OFF`, bez retain; ponowienie co 15 s za dnia i co 5 min w nocy, natychmiast przy zmianie stanu,
+- fizyczne potwierdzenie satelity: `stat/{id}/POWER`, `ON`/`OFF`, retain; dostępność: `tele/{id}/LWT`, `Online`/`Offline`, retain. EMS mapuje `{id}` dokładnie do pola MQTT odbiornika,
+- adapter istniejącego OpenBeken: EMS równolegle obsługuje `{id}/0/set`, `{id}/0/get` i `{id}/connected`; pozwala to usunąć zależność od HA przed rekonfiguracją urządzenia OTA,
 - sterowanie lokalnym GPIO w trybie Manual: `ems/sterownik-dzialka/relay/0/set` do `/9/set`, payload `ON` lub `OFF`, subskrypcja QoS 1 i bez retain,
-- polecenia do satelitów (ręczny bypass): `ems/remote/{device}/set`, bez retain,
+- polecenia do satelitów (ręczny bypass) są przejściowo wysyłane równolegle na `ems/remote/{device}/set` i `cmnd/{device}/POWER`, bez retain,
 - stan panelu: `GET /api/state`,
 - ustawienia: `GET /api/settings`, `POST /api/settings`,
 - restart: `POST /api/reboot`,

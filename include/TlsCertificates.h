@@ -1,7 +1,7 @@
 #pragma once
 
 namespace TlsCertificates {
-constexpr char letsEncryptRootX1[] = R"CERT(-----BEGIN CERTIFICATE-----
+inline constexpr char letsEncryptRootX1[] = R"CERT(-----BEGIN CERTIFICATE-----
 MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw
 TzELMAkGA1UEBhMCVVMxKTAnBgNVBAoTIEludGVybmV0IFNlY3VyaXR5IFJlc2Vh
 cmNoIEdyb3VwMRUwEwYDVQQDEwxJU1JHIFJvb3QgWDEwHhcNMTUwNjA0MTEwNDM4

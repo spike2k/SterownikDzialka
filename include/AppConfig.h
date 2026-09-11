@@ -33,12 +33,31 @@
 
 namespace Config {
 constexpr char deviceName[] = "sterownik-dzialka";
+// Jawny identyfikator wdrozenia; ESP.getSketchMD5() okazal sie niewystarczajacy
+// do rozroznienia obrazu przed i po zdalnej aktualizacji.
+constexpr char firmwareVersion[] = "2026.09.11-mqtt-contract-3";
 constexpr char accessPointName[] = "SterownikDzialka-Setup";
 constexpr char mqttStateTopic[] = "ems/sterownik-dzialka/state";
+constexpr char mqttStateGetTopic[] = "ems/sterownik-dzialka/state/get";
 constexpr char mqttStatusTopic[] = "ems/sterownik-dzialka/status";
+constexpr char mqttModeCommandTopic[] = "ems/sterownik-dzialka/mode/set";
+constexpr char mqttModeStateTopic[] = "ems/sterownik-dzialka/mode/state";
 constexpr char mqttRelayCommandTopic[] = "ems/sterownik-dzialka/relay/+/set";
 constexpr char mqttRelayCommandPrefix[] = "ems/sterownik-dzialka/relay/";
 constexpr char mqttLoadCommandPrefix[] = "ems/sterownik-dzialka/load/";
+// Wspolny kontrakt satelitow (Tasmota/OpenBeken): komenda nie-retained,
+// potwierdzony stan i LWT retained.
+constexpr char mqttSatelliteCommandPrefix[] = "cmnd/";
+constexpr char mqttSatelliteCommandSuffix[] = "/POWER";
+constexpr char mqttSatelliteStateTopic[] = "stat/+/POWER";
+constexpr char mqttSatelliteStatePrefix[] = "stat/";
+constexpr char mqttSatelliteAvailabilityTopic[] = "tele/+/LWT";
+constexpr char mqttSatelliteAvailabilityPrefix[] = "tele/";
+// Adapter przejsciowy dla juz zainstalowanych OpenBeken (kanal przekaznika 0).
+constexpr char mqttOpenBekenStateTopic[] = "+/0/get";
+constexpr char mqttOpenBekenStateSuffix[] = "/0/get";
+constexpr char mqttOpenBekenAvailabilityTopic[] = "+/connected";
+constexpr char mqttOpenBekenAvailabilitySuffix[] = "/connected";
 constexpr char mqttOtaCommandTopic[] = "ems/sterownik-dzialka/ota/set";
 constexpr char mqttOtaStatusTopic[] = "ems/sterownik-dzialka/ota/status";
 constexpr char otaFirmwareUrl[] = "https://www.warsztatweb.pl/esp32/dzialka/firmware.bin";
@@ -47,8 +66,20 @@ constexpr uint16_t mqttKeepAliveSeconds = 30;
 constexpr uint16_t mqttSocketTimeoutSeconds = 15;
 constexpr uint32_t mqttRetryMs = 5000;
 constexpr uint32_t telemetryIntervalMs = 1000;
-constexpr uint32_t mqttPublishIntervalMs = 5000;
-constexpr uint32_t mqttLoadRefreshMs = 30000;
+// MQTT state: częściej gdy PV produkuje, rzadziej w nocy; skok mocy / state/get wymusza od razu.
+constexpr uint32_t mqttPublishDayMs = 15000;
+constexpr uint32_t mqttPublishNightMs = 300000;
+constexpr uint32_t mqttLoadRefreshDayMs = 15000;
+constexpr uint32_t mqttLoadRefreshNightMs = 300000;
+constexpr uint32_t mqttDayConfirmMs = 30000;
+constexpr uint32_t mqttNightConfirmMs = 120000;
+constexpr uint32_t mqttBurstWindowMs = 90000;
+constexpr float mqttDayEnterPvW = 50.0f;
+constexpr float mqttNightEnterPvW = 20.0f;
+constexpr float mqttDeltaLoadW = 150.0f;
+constexpr float mqttDeltaPvW = 80.0f;
+constexpr float mqttDeltaSoc = 1.0f;
+constexpr float mqttDeltaBatteryA = 2.0f;
 constexpr uint32_t telemetryStaleMs = 15000;
 constexpr uint32_t wifiRetryMs = 15000;
 constexpr uint32_t wifiApFallbackMs = 25000;
