@@ -41,6 +41,7 @@ ma dokładnie jedną encję HA, która komunikuje się bezpośrednio z urządzen
 
 - `switch.dzialka_studnia` — kanał 0 OpenBeken,
 - `switch.dzialka_fontanna` — Tasmota,
+- `switch.dzialka_balia` — Tasmota,
 - `switch.dzialka_bojler` — Tasmota po uruchomieniu urządzenia.
 
 Sterownik EMS również komunikuje się bezpośrednio z satelitami. Nie instaluj
@@ -75,6 +76,25 @@ W panelu EMS ustaw wybrany odbiornik następująco:
 Każdy następny satelita dostaje unikalny, prosty identyfikator, np. `fontanna`,
 `bojler` albo `pompa`. Dodaj dla niego jedną bezpośrednią encję MQTT do sekcji
 `mqtt.switch` w `packages/sterownik_dzialka.yaml`.
+
+Przykład ręcznej encji dla identyfikatora `balia`:
+
+```yaml
+- name: "Działka balia"
+  default_entity_id: switch.dzialka_balia
+  unique_id: dzialka_balia
+  state_topic: "stat/balia/POWER"
+  command_topic: "cmnd/balia/POWER"
+  payload_on: "ON"
+  payload_off: "OFF"
+  optimistic: false
+  qos: 1
+  retain: false
+  availability_topic: "tele/balia/LWT"
+  payload_available: "Online"
+  payload_not_available: "Offline"
+  icon: mdi:hot-tub
+```
 
 Sterowanie przebiega następująco:
 

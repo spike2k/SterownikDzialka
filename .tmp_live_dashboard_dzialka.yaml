@@ -233,15 +233,6 @@ views:
           opacity: 8
         cards:
           - type: custom:mushroom-entity-card
-            entity: switch.dzialka_studnia
-            name: Studnia
-            icon: mdi:water-pump
-            icon_color: cyan
-            fill_container: true
-            tap_action: {action: toggle}
-            hold_action: {action: more-info}
-            grid_options: {columns: 6, rows: 2}
-          - type: custom:mushroom-entity-card
             entity: switch.dzialka_fontanna
             name: Fontanna
             icon: mdi:fountain
@@ -288,10 +279,8 @@ views:
             grid_options: {columns: 6, rows: 2}
           - type: markdown
             content: >-
-              **MQTT:** EMS wysyła automatykę na
-              `ems/sterownik-dzialka/load/<nazwa>/set`, ręczne polecenia na
-              `ems/remote/<nazwa>/set`, a HA publikuje rzeczywisty stan na
-              `ems/remote/<nazwa>/state` z `retain`.
+              **MQTT:** satelita odbiera `ON/OFF` z `ems/remote/<nazwa>/set`
+              i publikuje stan na `ems/remote/<nazwa>/state` z `retain`.
             grid_options: {columns: full}
 
       - type: grid

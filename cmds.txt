@@ -1,0 +1,9 @@
+1. Zgranie pełnego oryginalnego flasha 1 MB:
+python -c "import sys; sys.path.insert(0, r'K:\Projekty\SterownikDzialka\.codex-tools\esptool'); import esptool; esptool._main()" --chip esp8266 --port COM6 --baud 460800 --before no_reset read_flash 0x0 0x100000 "K:\Projekty\SterownikDzialka\Fl-S63-V1.0-original.bin"
+2. Wgranie Tasmoty z uprzednim wyczyszczeniem pamięci:
+python -c "import sys; sys.path.insert(0, r'K:\Projekty\SterownikDzialka\.codex-tools\esptool'); import esptool; esptool._main()" --chip esp8266 --port COM6 --baud 460800 --before no_reset write_flash --erase-all --flash_mode dout --flash_freq 40m --flash_size 1MB 0x0 "K:\Projekty\SterownikDzialka\tasmota-15.6.0.bin"
+Monitor Tasmoty — 115200 baud:
+python -c "import sys; sys.path.insert(0, r'K:\Projekty\SterownikDzialka\.codex-tools\esptool'); from serial.tools import miniterm; miniterm.main()" COM6 115200
+Log bootloadera ESP — 74880 baud:
+python -c "import sys; sys.path.insert(0, r'K:\Projekty\SterownikDzialka\.codex-tools\esptool'); from serial.tools import miniterm; miniterm.main()" COM6 74880
+Wyjście z monitora: Ctrl+].

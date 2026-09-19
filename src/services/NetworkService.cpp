@@ -477,7 +477,17 @@ void NetworkService::onMqtt(char* topic, uint8_t* payload, unsigned int length) 
     bool enabled = false;
     if (index < 0 || !parseOnOff(payload, length, enabled) || !relays_) return;
     relays_->reportRemoteState(static_cast<size_t>(index), enabled);
-    if (relays_->mode() == ControlMode::Auto && relays_->state(static_cast<size_t>(index)) != enabled) {
+    if (relays_->mode() == ControlMode::Manual) {
+      // W trybie recznym stan raportowany przez satelite jest autorytatywny
+      // (przycisk lokalny i HA sa rownoprawnymi sterowaniami). Zapamietaj go
+      // rowniez jako ostatni stan wyslany, aby publishLoadCommands() nie
+      // odsyłal raportu z powrotem jako nowej komendy. Dwie opoznione odpowiedzi
+      // ON/OFF mogly inaczej utworzyc samopodtrzymujaca petle MQTT.
+      strncpy(lastLoadKey_[index], key.c_str(), Config::labelBytes - 1);
+      lastLoadKey_[index][Config::labelBytes - 1] = '\0';
+      lastLoadOn_[index] = enabled;
+      lastLoadKeyValid_[index] = true;
+    } else if (relays_->state(static_cast<size_t>(index)) != enabled) {
       // Jedno natychmiastowe ponowienie; kolejne proby robi okresowy refresh,
       // wiec niedostepna satelita nie zalewa brokera w kazdej petli.
       lastLoadKeyValid_[index] = false;
