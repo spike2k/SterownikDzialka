@@ -44,7 +44,7 @@ Przekaźniki PCB nie powinny bezpośrednio przełączać dużych obciążeń 230
 
 Piny UART można zmienić w panelu WWW (koło zębate). Zmiana komunikacji wymaga restartu ESP. GPIO 6–11 zajmuje flash, 34–39 są tylko wejściami. Moduł przekaźników jest domyślnie aktywny stanem niskim.
 
-Kanał odbiornika jest aktywny, gdy ma GPIO ≥ 0 albo wypełniony identyfikator MQTT (np. `fontanna`). Oba puste = slot wyłączony. W Auto nadwyżka `pvW − loadW + moc lokalnych ON − rezerwa` jest rozdzielana od priorytetu 1 w dół; kanał z mocą 0 W jest pomijany. Histereza i minimalny czas przełączenia ograniczają cykanie styków. Most satelity w HA nasłuchuje `ems/sterownik-dzialka/load/{id}/set` oraz `ems/sterownik-dzialka/status`, steruje fizyczną encją i wyłącza ją przy `offline`.
+Kanał odbiornika jest aktywny, gdy ma GPIO ≥ 0 albo wypełniony identyfikator MQTT (np. `fontanna`). Oba puste = slot wyłączony. W Auto nadwyżka `pvW − loadW + moc wszystkich sterowanych ON − rezerwa` jest rozdzielana od priorytetu 1 w dół; kanał z mocą 0 W jest pomijany. Histereza i minimalny czas przełączenia ograniczają cykanie styków. EMS steruje satelitami bezpośrednio przez MQTT; Home Assistant nie pośredniczy w komunikacji.
 
 ## Konfiguracja
 
@@ -95,6 +95,12 @@ Przed rozpoczęciem DNS/HTTPS firmware wypisuje bieżące zadanie z watchdoga, a
 po nieudanej aktualizacji zapisuje je ponownie. Nowa partycja jest zatwierdzana
 na samym początku `setup()`. Dzięki temu dłuższy handshake TLS nie resetuje
 aktualizacji, a poprawnie uruchomiony obraz nie wpada w automatyczny rollback.
+
+Transfer OTA korzysta z bufora na stercie i powiększonego stosu pętli, podtrzymuje
+sesję MQTT podczas pobierania oraz ma 60-sekundowy limit braku danych i
+10-minutowy limit całej operacji. Jeżeli MQTT rozłączy się podczas transferu,
+szczegółowy błąd (w tym liczba pobranych bajtów przy zerwanym połączeniu) jest
+publikowany po ponownym połączeniu zamiast zostać zastąpiony statusem `ready`.
 
 Status OTA zawiera również jawne pole `firmwareVersion`. Po restarcie sprawdzaj
 je zamiast polegać wyłącznie na `currentFirmwareMd5`.

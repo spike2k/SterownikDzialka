@@ -36,11 +36,17 @@ void RelayController::tick(bool telemetryHealthy, float pvPowerW, float loadPowe
   if (mode_ != ControlMode::Auto || !settings_) return;
 
   const auto& cfg = settings_->values;
-  float localOnW = 0;
+  // loadPowerW already contains the consumption of every running load, including
+  // MQTT satellites. Add all commanded loads back to reconstruct the surplus
+  // that was available before load allocation. Limiting this to local GPIO
+  // outputs makes a remote load oscillate: ON raises measured load, the next
+  // tick sees no surplus and switches it OFF, then repeats after consumption
+  // disappears.
+  float controlledOnW = 0;
   for (size_t index = 0; index < Config::loadCount; ++index) {
-    if (states_[index] && cfg.loads[index].pin >= 0) localOnW += cfg.loads[index].powerW;
+    if (states_[index]) controlledOnW += cfg.loads[index].powerW;
   }
-  float remaining = pvPowerW - loadPowerW + localOnW - cfg.surplusReserveW;
+  float remaining = pvPowerW - loadPowerW + controlledOnW - cfg.surplusReserveW;
 
   uint8_t order[Config::loadCount];
   size_t count = 0;

@@ -35,7 +35,7 @@ namespace Config {
 constexpr char deviceName[] = "sterownik-dzialka";
 // Jawny identyfikator wdrozenia; ESP.getSketchMD5() okazal sie niewystarczajacy
 // do rozroznienia obrazu przed i po zdalnej aktualizacji.
-constexpr char firmwareVersion[] = "2026.09.11-mqtt-contract-3";
+constexpr char firmwareVersion[] = "2026.09.14-satellite-ota-fix-2";
 constexpr char accessPointName[] = "SterownikDzialka-Setup";
 constexpr char mqttStateTopic[] = "ems/sterownik-dzialka/state";
 constexpr char mqttStateGetTopic[] = "ems/sterownik-dzialka/state/get";

@@ -16,6 +16,10 @@
 #include "services/NetworkService.h"
 #include "web/WebPanel.h"
 
+// HTTPS OTA runs from loopTask. Leave enough stack headroom for TLS and the
+// application callback even though the transfer buffer itself lives on heap.
+SET_LOOP_TASK_STACK_SIZE(16384);
+
 Settings settings;
 Telemetry telemetry;
 RelayController relays;

@@ -4,12 +4,15 @@
 #include <Update.h>
 #include <WiFiClientSecure.h>
 #include <mbedtls/sha256.h>
+#include <memory>
+#include <new>
 
 #include "AppConfig.h"
 #include "TlsCertificates.h"
 
 namespace {
-constexpr uint32_t kDownloadTimeoutMs = 15000;
+constexpr uint32_t kDownloadIdleTimeoutMs = 60000;
+constexpr uint32_t kDownloadTotalTimeoutMs = 10 * 60 * 1000;
 constexpr size_t kDownloadBufferBytes = 4096;
 
 String sha256Hex(const unsigned char hash[32]) {
@@ -24,18 +27,19 @@ String sha256Hex(const unsigned char hash[32]) {
 }
 }
 
-bool OtaUpdater::install(const char* expectedSha256, String& error) {
-  return installFrom(Config::otaFirmwareUrl, expectedSha256, error);
+bool OtaUpdater::install(const char* expectedSha256, String& error, const ServiceCallback& service) {
+  return installFrom(Config::otaFirmwareUrl, expectedSha256, error, service);
 }
 
-bool OtaUpdater::installFrom(const char* firmwareUrl, const char* expectedSha256, String& error) {
+bool OtaUpdater::installFrom(const char* firmwareUrl, const char* expectedSha256, String& error,
+                             const ServiceCallback& service) {
   WiFiClientSecure tlsClient;
   tlsClient.setCACert(TlsCertificates::letsEncryptRootX1);
-  tlsClient.setHandshakeTimeout(15);
+  tlsClient.setHandshakeTimeout(30);
 
   HTTPClient request;
-  request.setConnectTimeout(kDownloadTimeoutMs);
-  request.setTimeout(kDownloadTimeoutMs);
+  request.setConnectTimeout(kDownloadIdleTimeoutMs);
+  request.setTimeout(kDownloadIdleTimeoutMs);
   if (!request.begin(tlsClient, firmwareUrl)) {
     error = "nie mozna otworzyc adresu HTTPS";
     return false;
@@ -71,16 +75,38 @@ bool OtaUpdater::installFrom(const char* firmwareUrl, const char* expectedSha256
   }
 
   WiFiClient* stream = request.getStreamPtr();
-  uint8_t buffer[kDownloadBufferBytes];
+  // TLS, HTTPClient and Update already use several kilobytes. Keeping another
+  // 4 KiB buffer on Arduino's default 8 KiB loop stack can reset the ESP in the
+  // middle of an update, before Update.end() makes the new partition bootable.
+  std::unique_ptr<uint8_t[]> buffer(new (std::nothrow) uint8_t[kDownloadBufferBytes]);
+  if (!buffer) {
+    error = "brak pamieci na bufor pobierania";
+    Update.abort();
+    request.end();
+    mbedtls_sha256_free(&shaContext);
+    return false;
+  }
   size_t totalWritten = 0;
+  const uint32_t startedMs = millis();
   uint32_t lastDataMs = millis();
   bool downloadOk = true;
 
   while (totalWritten < static_cast<size_t>(firmwareSize)) {
+    if (service) service();
     const size_t available = stream->available();
     if (available == 0) {
-      if (millis() - lastDataMs >= kDownloadTimeoutMs) {
+      if (!stream->connected()) {
+        error = "serwer zamknal polaczenie po " + String(totalWritten) + "/" + String(firmwareSize) + " B";
+        downloadOk = false;
+        break;
+      }
+      if (millis() - lastDataMs >= kDownloadIdleTimeoutMs) {
         error = "timeout pobierania";
+        downloadOk = false;
+        break;
+      }
+      if (millis() - startedMs >= kDownloadTotalTimeoutMs) {
+        error = "przekroczono 10 minut pobierania";
         downloadOk = false;
         break;
       }
@@ -89,18 +115,19 @@ bool OtaUpdater::installFrom(const char* firmwareUrl, const char* expectedSha256
     }
 
     const size_t remaining = static_cast<size_t>(firmwareSize) - totalWritten;
-    const size_t requested = min(available, min(remaining, sizeof(buffer)));
-    const int bytesRead = stream->readBytes(buffer, requested);
+    const size_t requested = min(available, min(remaining, kDownloadBufferBytes));
+    const int bytesRead = stream->readBytes(buffer.get(), requested);
     if (bytesRead <= 0) continue;
     lastDataMs = millis();
 
-    if (mbedtls_sha256_update_ret(&shaContext, buffer, static_cast<size_t>(bytesRead)) != 0 ||
-        Update.write(buffer, static_cast<size_t>(bytesRead)) != static_cast<size_t>(bytesRead)) {
+    if (mbedtls_sha256_update_ret(&shaContext, buffer.get(), static_cast<size_t>(bytesRead)) != 0 ||
+        Update.write(buffer.get(), static_cast<size_t>(bytesRead)) != static_cast<size_t>(bytesRead)) {
       error = Update.hasError() ? Update.errorString() : "blad obliczania SHA-256";
       downloadOk = false;
       break;
     }
     totalWritten += static_cast<size_t>(bytesRead);
+    if (service) service();
   }
 
   unsigned char hash[32];

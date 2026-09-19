@@ -76,6 +76,8 @@ class NetworkService {
   bool lastLoadKeyValid_[Config::loadCount] = {};
   bool lastRelayOn_[Config::loadCount] = {};
   bool lastRelayStateValid_[Config::loadCount] = {};
+  char deferredOtaState_[20] = {};
+  char deferredOtaDetail_[128] = {};
   ControlMode lastMode_ = ControlMode::Auto;
   bool lastModeValid_ = false;
   char pendingOtaSha256_[65] = {};

@@ -12,10 +12,12 @@
 #include "core/Settings.h"
 #include "services/OtaUpdater.h"
 
+SET_LOOP_TASK_STACK_SIZE(16384);
+
 namespace {
-constexpr char kBridgeVersion[] = "2026.09.11-ota-bridge-3";
+constexpr char kBridgeVersion[] = "2026.09.14-ota-bridge-4";
 constexpr char kFinalFirmwareUrl[] = "https://www.warsztatweb.pl/esp32/dzialka/firmware-full.bin";
-constexpr char kFinalFirmwareSha256[] = "d99f3f26d3ae84a0800e11996058b6aacb92721eb941e90ea444f0e99314481b";
+constexpr char kFinalFirmwareSha256[] = "a75a698d4b7b352cd05fc5f5e3df1c90c5965408cd6d2f7a7a688a27ba9e069c";
 constexpr char kOnline[] = "maintenance";
 constexpr char kOffline[] = "offline";
 
@@ -129,7 +131,7 @@ void loop() {
     publishStatus("downloading");
     mqtt.loop();
     String error;
-    if (!updater.install(expected, error)) {
+    if (!updater.install(expected, error, []() { mqtt.loop(); })) {
       publishStatus("error", error.c_str());
     } else {
       publishStatus("installed");
@@ -148,7 +150,7 @@ void loop() {
     publishStatus("installing-final");
     mqtt.loop();
     String error;
-    if (!updater.installFrom(kFinalFirmwareUrl, kFinalFirmwareSha256, error)) {
+    if (!updater.installFrom(kFinalFirmwareUrl, kFinalFirmwareSha256, error, []() { mqtt.loop(); })) {
       publishStatus("final-error", error.c_str());
     } else {
       publishStatus("final-installed");

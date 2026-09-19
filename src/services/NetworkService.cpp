@@ -219,7 +219,17 @@ void NetworkService::connectMqtt() {
   }
   mqtt_.publish(Config::mqttStatusTopic, kOnline, true);
   publishControlState(true);
-  publishOtaStatus("ready");
+  if (deferredOtaState_[0]) {
+    char state[sizeof(deferredOtaState_)];
+    char detail[sizeof(deferredOtaDetail_)];
+    memcpy(state, deferredOtaState_, sizeof(state));
+    memcpy(detail, deferredOtaDetail_, sizeof(detail));
+    deferredOtaState_[0] = '\0';
+    deferredOtaDetail_[0] = '\0';
+    publishOtaStatus(state, detail);
+  } else {
+    publishOtaStatus("ready");
+  }
   lastMqttPublishMs_ = 0;
   lastMqttLoadRefreshMs_ = 0;
   for (size_t index = 0; index < Config::loadCount; ++index) lastLoadKeyValid_[index] = false;
@@ -413,12 +423,13 @@ void NetworkService::handlePendingOta() {
   mqtt_.loop();
   Serial.printf("OTA: pobieranie %s\n", Config::otaFirmwareUrl);
 
-  // HTTPS i finalizacja obrazu mogą trwać dłużej niż watchdog pętli głównej.
-  // W razie błędu przywracamy nadzór; po sukcesie urządzenie natychmiast się restartuje.
+  // HTTPS handshake can block longer than the normal 10 s loop watchdog.
+  // Suspend it for the bounded OTA operation and restore it on every return.
   const bool watchdogWasRegistered = esp_task_wdt_delete(nullptr) == ESP_OK;
   String error;
-  if (!otaUpdater_.install(expectedSha256, error)) {
-    if (watchdogWasRegistered) esp_task_wdt_add(nullptr);
+  const bool installed = otaUpdater_.install(expectedSha256, error, [this]() { mqtt_.loop(); });
+  if (watchdogWasRegistered) esp_task_wdt_add(nullptr);
+  if (!installed) {
     Serial.printf("OTA error: %s\n", error.c_str());
     publishOtaStatus("error", error.c_str());
     return;
@@ -431,7 +442,6 @@ void NetworkService::handlePendingOta() {
 }
 
 void NetworkService::publishOtaStatus(const char* state, const char* detail) {
-  if (!mqtt_.connected()) return;
   String json = String("{\"state\":\"") + state + "\",\"firmwareVersion\":\"" + Config::firmwareVersion +
                 "\",\"currentFirmwareMd5\":\"" + ESP.getSketchMD5() + "\"";
   if (detail && detail[0] != '\0') {
@@ -441,7 +451,11 @@ void NetworkService::publishOtaStatus(const char* state, const char* detail) {
     json += ",\"detail\":\"" + safeDetail + "\"";
   }
   json += "}";
-  mqtt_.publish(Config::mqttOtaStatusTopic, json.c_str(), true);
+  if (mqtt_.connected() && mqtt_.publish(Config::mqttOtaStatusTopic, json.c_str(), true)) return;
+  strncpy(deferredOtaState_, state, sizeof(deferredOtaState_) - 1);
+  deferredOtaState_[sizeof(deferredOtaState_) - 1] = '\0';
+  strncpy(deferredOtaDetail_, detail ? detail : "", sizeof(deferredOtaDetail_) - 1);
+  deferredOtaDetail_[sizeof(deferredOtaDetail_) - 1] = '\0';
 }
 
 void NetworkService::onMqtt(char* topic, uint8_t* payload, unsigned int length) {
